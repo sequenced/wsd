@@ -86,7 +86,7 @@ main(int argc, char **argv)
   openlog(ident, LOG_PID, LOG_USER);
   syslog(LOG_INFO, "starting");
 
-  pid_t pid;
+  pid_t pid=0;
   if (!cfg.no_fork)
     {
       if (0>(pid=fork()))
