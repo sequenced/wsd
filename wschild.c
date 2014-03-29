@@ -10,6 +10,8 @@
 #include <poll.h>
 #include <assert.h>
 #include "wstypes.h"
+#include "http.h"
+#include "ws.h"
 
 #define UNASSIGNED (-1)
 /* assumes max poll file descriptors equals max connections */
@@ -84,6 +86,7 @@ conn_set(int slot, struct pollfd *pfd)
     return -1;
 
   conn[slot].pfd=pfd;
+  conn[slot].proto=WSCHILD_PROTO_HTTP;
   return 0;
 }
 
@@ -97,10 +100,13 @@ conn_clear(int slot)
     {
       conn[slot].pfd=conn[slot+1].pfd;
       conn[slot].buf=conn[slot+1].buf;
+      conn[slot].proto=conn[slot+1].proto;
     }
 
+  conn[slot].proto=WSCHILD_PROTO_HTTP;
   conn[slot].pfd=NULL;
   buf_clear(conn[slot].buf);
+  
   return 0;
 }
 
@@ -214,14 +220,14 @@ on_accept(int fd)
     {
       close(s);
       if (wsd_cfg->verbose)
-        log_addr("no slots: cannot server client: %s:%d\n", cl);
+        log_addr("no slots: closing: %s:%d\n", cl);
     }
   else
     {
       pfd_set(slot, s, POLLIN);
       conn_set(slot, &pfd_get(slot));
       if (wsd_cfg->verbose)
-        log_addr("accepting client: %s:%d\n", cl);
+        log_addr("accepting: %s:%d\n", cl);
     }
 
   return 0;
@@ -248,11 +254,16 @@ on_read(wschild_conn_t *conn)
     return 0;
 
   buf_put(conn->buf, len);
-  buf_flip(conn->buf);
-  printf("%s", buf_get(conn->buf));
-  buf_flip(conn->buf);
 
-  return len;
+  int rv;
+  if (conn->proto&WSCHILD_PROTO_HTTP)
+    rv=on_http_data(conn);
+  else if (conn->proto&WSCHILD_PROTO_WS)
+    rv=on_ws_data(conn);
+  else
+    rv=(-1);
+
+  return rv;
 }
 
 static int
