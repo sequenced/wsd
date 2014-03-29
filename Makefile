@@ -6,7 +6,7 @@ include .dep
 
 CFLAGS = -Wall -ggdb -I. -L.
 
-wsd:	wsd.o wschild.o http.o ws.o
+wsd:	wsd.o wschild.o http.o ws.o wstypes.o
 	$(CC) $(CFLAGS) -lrt $^ -o $@
 
 clean:

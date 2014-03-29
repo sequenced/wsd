@@ -13,7 +13,6 @@
 #include "http.h"
 #include "ws.h"
 
-#define UNASSIGNED (-1)
 /* assumes max poll file descriptors equals max connections */
 #define MAX_DESC 32
 #define MAX_CONN MAX_DESC
@@ -36,62 +35,31 @@ static int io_loop();
 static void sighup(int sig);
 
 static inline int
-buf_init(buf_t *buf, int size)
-{
-  buf->swap=UNASSIGNED;
-  buf->capacity=size;
-  buf->limit=buf->capacity;
-  buf->p=malloc(buf->capacity);
-  if (NULL==buf->p)
-    return -1;
-  return 0;
-}
-
-#define buf_clear(buf)                                          \
-  buf.pos=0; buf.swap=UNASSIGNED; buf.limit=buf.capacity;
-#define buf_get(buf) (buf.p+buf.pos)
-#define buf_len(buf) (buf.limit-buf.pos)
-#define buf_put(buf, len) (buf.pos+=len)
-#define buf_flip(buf)                                 \
-  if (UNASSIGNED==buf.swap)                           \
-    {                                                 \
-      buf.swap=*(char*)(buf.p+buf.pos);               \
-      *(buf.p+buf.pos)='\0';                          \
-      buf.limit=buf.pos;                              \
-      buf.pos=0;                                      \
-    }                                                 \
-  else                                                \
-    {                                                 \
-      buf.pos=buf.limit;                              \
-      buf.limit=buf.capacity;                         \
-      *(buf.p+buf.pos)=(char)buf.swap;                \
-      buf.swap=UNASSIGNED;                            \
-    }
-
-static inline int
 conn_init()
 {
   memset(&conn, 0x0, sizeof(conn));
   int i;
   for (i=0; i<MAX_CONN; i++)
-    if (0>buf_init(&conn[i].buf, BUF_SIZE))
+    if (NULL==(conn[i].buf=buf_alloc(BUF_SIZE)))
       return -1;
+
   return 0;
 }
 
 static inline int
-conn_set(int slot, struct pollfd *pfd)
+conn_alloc(int slot, struct pollfd *pfd)
 {
   if (slot>=MAX_CONN)
     return -1;
 
   conn[slot].pfd=pfd;
-  conn[slot].proto=WSCHILD_PROTO_HTTP;
+  conn[slot].on_read=http_on_read;
+  conn[slot].on_write=http_on_write;
   return 0;
 }
 
 static inline int
-conn_clear(int slot)
+conn_free(int slot)
 {
   if (slot>=MAX_CONN)
     return -1;
@@ -100,10 +68,12 @@ conn_clear(int slot)
     {
       conn[slot].pfd=conn[slot+1].pfd;
       conn[slot].buf=conn[slot+1].buf;
-      conn[slot].proto=conn[slot+1].proto;
+      conn[slot].on_read=conn[slot+1].on_read;
+      conn[slot].on_write=conn[slot+1].on_write;
     }
 
-  conn[slot].proto=WSCHILD_PROTO_HTTP;
+  conn[slot].on_read=http_on_read;
+  conn[slot].on_write=http_on_write;
   conn[slot].pfd=NULL;
   buf_clear(conn[slot].buf);
   
@@ -122,7 +92,7 @@ pfd_init()
 }
 
 static inline int
-pfd_clear(int slot)
+pfd_free(int slot)
 {
   if (slot>=MAX_DESC)
     return -1;
@@ -142,7 +112,7 @@ pfd_clear(int slot)
 }
 
 static inline int
-pfd_set(int slot, int fd, short events)
+pfd_alloc(int slot, int fd, short events)
 {
   if (slot>=MAX_DESC)
     return -1;
@@ -187,8 +157,8 @@ wschild_main(const wsd_config_t *cfg)
 
   int slot;
   slot=pfd_find_free_slot();
-  pfd_set(slot, wsd_cfg->sock, POLLIN);
-  conn_set(slot, &pfd_get(slot));
+  pfd_alloc(slot, wsd_cfg->sock, POLLIN);
+  conn_alloc(slot, &pfd_get(slot));
 
   struct sigaction act;
   memset(&act, 0x0, sizeof(struct sigaction));
@@ -224,8 +194,8 @@ on_accept(int fd)
     }
   else
     {
-      pfd_set(slot, s, POLLIN);
-      conn_set(slot, &pfd_get(slot));
+      pfd_alloc(slot, s, POLLIN);
+      conn_alloc(slot, &pfd_get(slot));
       if (wsd_cfg->verbose)
         log_addr("accepting: %s:%d\n", cl);
     }
@@ -244,7 +214,7 @@ on_read(wschild_conn_t *conn)
 {
   int len;
   len=read(conn->pfd->fd,
-           buf_get(conn->buf),
+           buf_ref(conn->buf),
            buf_len(conn->buf));
 
   if (0>len)
@@ -254,16 +224,10 @@ on_read(wschild_conn_t *conn)
     return 0;
 
   buf_put(conn->buf, len);
+  if (0>conn->on_read(conn))
+    return 0;
 
-  int rv;
-  if (conn->proto&WSCHILD_PROTO_HTTP)
-    rv=on_http_data(conn);
-  else if (conn->proto&WSCHILD_PROTO_WS)
-    rv=on_ws_data(conn);
-  else
-    rv=(-1);
-
-  return rv;
+  return 1;
 }
 
 static int
@@ -289,8 +253,8 @@ io_loop()
                         {
                           perror("on_accept");
                           close(pfd[i].fd);
-                          pfd_clear(i);
-                          conn_clear(i);
+                          pfd_free(i);
+                          conn_free(i);
                         }
                     }
                   else
@@ -301,8 +265,8 @@ io_loop()
                           if (rv>0)
                             perror("on_read");
                           close(pfd[i].fd);
-                          pfd_clear(i);
-                          conn_clear(i);
+                          pfd_free(i);
+                          conn_free(i);
                         }
                     }
                 }
@@ -315,16 +279,16 @@ io_loop()
                       if (rv>0)
                         perror("on_write");
                       close(pfd[i].fd);
-                      pfd_clear(i);
-                      conn_clear(i);
+                      pfd_free(i);
+                      conn_free(i);
                     }
                 }
 
               if ((POLLHUP|POLLERR)&pfd[i].revents)
                 {
                   close(pfd[i].fd);
-                  pfd_clear(i);
-                  conn_clear(i);
+                  pfd_free(i);
+                  conn_free(i);
                 }
 
               if (0!=pfd[i].revents)
@@ -347,8 +311,8 @@ sighup(int sig)
       if (pfd_is_in_use(i))
         {
           close(pfd_get(i).fd);
-          pfd_clear(i);
-          conn_clear(i);
+          pfd_free(i);
+          conn_free(i);
         }
     }
 }
