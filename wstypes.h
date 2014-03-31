@@ -18,7 +18,7 @@ typedef struct
 typedef struct
 {
   char *start;
-  char *end;
+  int len;
 } char_range_t;
 
 typedef struct
@@ -37,6 +37,7 @@ void buf_put(buf_t *b, int len);
 char buf_get(buf_t *b);
 char* buf_ref(buf_t *b);
 int buf_len(buf_t *b);
+int buf_pos(buf_t *b);
 char* buf_flip(buf_t *b);
 
 struct wschild_conn

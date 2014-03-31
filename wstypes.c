@@ -39,6 +39,12 @@ buf_clear(buf_t *b)
   b->swap='\0';
 }
 
+inline int
+buf_pos(buf_t *b)
+{
+  return b->pos;
+}
+
 inline void
 buf_put(buf_t *b, int len)
 {
