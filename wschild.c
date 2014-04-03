@@ -2,6 +2,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -40,7 +41,8 @@ conn_init()
   memset(&conn, 0x0, sizeof(conn));
   int i;
   for (i=0; i<MAX_CONN; i++)
-    if (NULL==(conn[i].buf=buf_alloc(BUF_SIZE)))
+    if (NULL==(conn[i].buf_in=buf_alloc(BUF_SIZE))
+        || NULL==(conn[i].buf_out=buf_alloc(BUF_SIZE)))
       return -1;
 
   return 0;
@@ -67,15 +69,19 @@ conn_free(int slot)
   for (;slot<(MAX_CONN-1); slot++)
     {
       conn[slot].pfd=conn[slot+1].pfd;
-      conn[slot].buf=conn[slot+1].buf;
+      conn[slot].buf_in=conn[slot+1].buf_in;
+      conn[slot].buf_out=conn[slot+1].buf_out;
       conn[slot].on_read=conn[slot+1].on_read;
       conn[slot].on_write=conn[slot+1].on_write;
+      conn[slot].close_on_write=conn[slot+1].close_on_write;
     }
 
   conn[slot].on_read=http_on_read;
   conn[slot].on_write=http_on_write;
   conn[slot].pfd=NULL;
-  buf_clear(conn[slot].buf);
+  buf_clear(conn[slot].buf_in);
+  buf_clear(conn[slot].buf_out);
+  conn[slot].close_on_write=0;
   
   return 0;
 }
@@ -206,7 +212,33 @@ on_accept(int fd)
 static int
 on_write(wschild_conn_t *conn)
 {
-  return -1;
+  int len;
+  len=write(conn->pfd->fd,
+            buf_ref(conn->buf_out),
+            buf_len(conn->buf_out));
+
+  if (0>len)
+    {
+      if (errno==EAGAIN || errno==EWOULDBLOCK)
+        return 1;
+
+      return -1;
+    }
+
+  if (0==len)
+    return 0;
+
+  buf_fwd(conn->buf_out, len);
+  if (0==buf_len(conn->buf_out))
+    {
+      buf_clear(conn->buf_out);
+      conn->pfd->events&=(~POLLOUT);
+
+      if (conn->close_on_write)
+        return 0;
+    }
+
+  return 1;
 }
 
 static int
@@ -214,16 +246,21 @@ on_read(wschild_conn_t *conn)
 {
   int len;
   len=read(conn->pfd->fd,
-           buf_ref(conn->buf),
-           buf_len(conn->buf));
+           buf_ref(conn->buf_in),
+           buf_len(conn->buf_in));
 
   if (0>len)
-    return -1;
+    {
+      if (errno==EAGAIN || errno==EWOULDBLOCK)
+        return 1;
+
+      return -1;
+    }
 
   if (0==len)
     return 0;
 
-  buf_put(conn->buf, len);
+  buf_fwd(conn->buf_in, len);
   if (0>conn->on_read(conn))
     return 0;
 

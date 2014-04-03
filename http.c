@@ -1,6 +1,9 @@
 #include <string.h>
 #include <stdio.h>
+#include <poll.h>
 #include "http.h"
+
+#define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\n\r\n"
 
 static const char *METHOD_GET="GET";
 static const char *HTTP_VER="HTTP/1.1";
@@ -16,7 +19,8 @@ typedef struct
   int is_uri_abs;
 } http_req_line_t;
 
-static int is_valid_request_line_syntax(http_req_line_t *hrl);
+static int is_valid_req_line_syntax(http_req_line_t *hrl);
+static int prepare_500_response(buf_t *b);
 
 static inline int
 parse_el_crlf(buf_t *b)
@@ -71,40 +75,51 @@ parse_req_line(buf_t *b, http_req_line_t *hrl)
 int
 http_on_read(wschild_conn_t *conn)
 {
-  buf_flip(conn->buf);
+  buf_flip(conn->buf_in);
 
   http_req_line_t hrl;
   memset(&hrl, 0x0, sizeof(hrl));
-  int rv=parse_req_line(conn->buf, &hrl);
+  int rv=parse_req_line(conn->buf_in, &hrl);
   if (0>rv)
     /* parse error */
     return -1;
   else if (0==rv)
     {
       /* not enough data */
-      buf_flip(conn->buf);
+      buf_flip(conn->buf_in);
       return 1;
     }
 
   /* have three tokens terminated with `\r\n' (see RFC2616 section 5.1) */
-  if (!is_valid_request_line_syntax(&hrl))
-    /* TODO return 500 or someting */
-    ;
+  if (!is_valid_req_line_syntax(&hrl))
+    {
+      if (0>prepare_500_response(conn->buf_out))
+        /* request wrong, can't prepare response so bail out */
+        return -1;
 
-  printf("%s", buf_ref(conn->buf));
+      buf_clear(conn->buf_in);
+      buf_flip(conn->buf_out);
+      conn->pfd->events|=POLLOUT;
+      conn->close_on_write=1;
 
-  buf_clear(conn->buf);
+      return 1;
+    }
+
+  printf("%s", buf_ref(conn->buf_in));
+
+  buf_clear(conn->buf_in);
   return 1;
 }
 
 int
 http_on_write(wschild_conn_t *conn)
 {
+  
   return -1;
 }
 
 static int
-is_valid_request_line_syntax(http_req_line_t *hrl)
+is_valid_req_line_syntax(http_req_line_t *hrl)
 {
   if (0!=strncmp(hrl->method.start,
                  METHOD_GET,
@@ -129,6 +144,19 @@ is_valid_request_line_syntax(http_req_line_t *hrl)
                      URI_ABSOLUTE,
                      7)) /* strlen(URI_ABSOLUTE) */
     hrl->is_uri_abs=1;
+
+  return 1;
+}
+
+static int
+prepare_500_response(buf_t *b)
+{
+  /* see RFC2616 section 6.1.1 */
+  if (buf_len(b)<(strlen(HTTP_500)))
+    return -1;
+
+  strcpy(buf_ref(b), HTTP_500);
+  buf_fwd(b, strlen(HTTP_500));
 
   return 1;
 }

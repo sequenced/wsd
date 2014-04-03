@@ -33,7 +33,8 @@ typedef struct
 buf_t* buf_alloc(int capacity);
 void buf_free(buf_t *b);
 void buf_clear(buf_t *b);
-void buf_put(buf_t *b, int len);
+void buf_fwd(buf_t *b, int len);
+void buf_put(buf_t *b, char c);
 char buf_get(buf_t *b);
 char* buf_ref(buf_t *b);
 int buf_len(buf_t *b);
@@ -43,9 +44,11 @@ char* buf_flip(buf_t *b);
 struct wschild_conn
 {
   struct pollfd *pfd;
-  buf_t *buf;
+  buf_t *buf_in;
+  buf_t *buf_out;
   int (*on_read)(struct wschild_conn *conn);
   int (*on_write)(struct wschild_conn *conn);
+  int close_on_write;
 };
 typedef struct wschild_conn wschild_conn_t;
 

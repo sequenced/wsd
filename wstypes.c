@@ -46,7 +46,7 @@ buf_pos(buf_t *b)
 }
 
 inline void
-buf_put(buf_t *b, int len)
+buf_fwd(buf_t *b, int len)
 {
   b->pos+=len;
 }
@@ -89,4 +89,11 @@ buf_flip(buf_t *b)
     }
 
   return (b->p+b->pos);
+}
+
+inline void
+buf_put(buf_t *b, char c)
+{
+  *(b->p+b->pos)=c;
+  b->pos++;
 }
