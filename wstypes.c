@@ -46,6 +46,12 @@ buf_pos(buf_t *b)
 }
 
 inline void
+buf_rwnd(buf_t *b, int len)
+{
+  b->pos-=len;
+}
+
+inline void
 buf_fwd(buf_t *b, int len)
 {
   b->pos+=len;

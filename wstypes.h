@@ -33,6 +33,7 @@ typedef struct
 buf_t* buf_alloc(int capacity);
 void buf_free(buf_t *b);
 void buf_clear(buf_t *b);
+void buf_rwnd(buf_t *b, int len);
 void buf_fwd(buf_t *b, int len);
 void buf_put(buf_t *b, char c);
 char buf_get(buf_t *b);
