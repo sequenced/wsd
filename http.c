@@ -3,8 +3,10 @@
 #include <poll.h>
 #include "http.h"
 
-#define HTTP_501 "HTTP/1.1 501 Not Implemented\r\n\r\n"
-#define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\n\r\n"
+#define HTTP_501 "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n"
+#define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
+
+extern const wsd_config_t *wsd_cfg;
 
 static const char *METHOD_GET="GET";
 static const char *HTTP_VER="HTTP/1.1";
@@ -12,8 +14,13 @@ static const char *URI_ANY="*";
 static const char *URI_ABSOLUTE="http://";
 static const char *FLD_USER_AGENT="User-Agent:";
 static const char *FLD_CONNECTION="Connection:";
+static const char *FLD_CONNECTION_VAL="Upgrade";
 static const char *FLD_HOST="Host:";
+static const char *FLD_SEC_WS_KEY="Sec-WebSocket-Key:";
+static const char *FLD_SEC_WS_VER="Sec-WebSocket-Version:";
+static const char *FLD_SEC_WS_EXT="Sec-WebSocket-Extensions:";
 static const char *FLD_UPGRADE="Upgrade:";
+static const char *FLD_UPGRADE_VAL="websocket";
 
 /* as per RFC2616 section 5.1 */
 typedef struct
@@ -25,11 +32,16 @@ typedef struct
   char_range_t user_agent;
   char_range_t conn;
   char_range_t upgrade;
+  char_range_t sec_ws_key;
+  char_range_t sec_ws_ver;
+  char_range_t sec_ws_ext;
   int is_uri_abs;
 } http_req_t;
 
+static int is_valid_ws_req(http_req_t *hr);
 static int is_valid_req_line_syntax(http_req_t *hr);
 static int prepare_XXX_response(buf_t *b, const char *s);
+static void trim(char_range_t *r);
 
 static inline int
 parse_el_crlf(buf_t *b)
@@ -132,6 +144,27 @@ parse_req_hdr_flds(buf_t *b, http_req_t *hr)
           if (0>parse_hdr_fld(b, &(hr->host)))
             return -1;
         }
+      else if (0==strncasecmp(cr.start,
+                              FLD_SEC_WS_KEY,
+                              strlen(FLD_SEC_WS_KEY)))
+        {
+          if (0>parse_hdr_fld(b, &(hr->sec_ws_key)))
+            return -1;
+        }
+      else if (0==strncasecmp(cr.start,
+                              FLD_SEC_WS_VER,
+                              strlen(FLD_SEC_WS_VER)))
+        {
+          if (0>parse_hdr_fld(b, &(hr->sec_ws_ver)))
+            return -1;
+        }
+      else if (0==strncasecmp(cr.start,
+                              FLD_SEC_WS_EXT,
+                              strlen(FLD_SEC_WS_EXT)))
+        {
+          if (0>parse_hdr_fld(b, &(hr->sec_ws_ext)))
+            return -1;
+        }
       else
         {
           /* ignore unrecognised fields */
@@ -175,6 +208,9 @@ http_on_read(wschild_conn_t *conn)
 {
   buf_flip(conn->buf_in);
 
+  if (wsd_cfg->verbose)
+    printf("%s", buf_ref(conn->buf_in));
+
   http_req_t hr;
   memset(&hr, 0x0, sizeof(hr));
   int rv;
@@ -207,8 +243,7 @@ http_on_read(wschild_conn_t *conn)
       goto error;
     }
 
-  if (NULL==hr.conn.start
-      || NULL==hr.upgrade.start)
+  if (0>(is_valid_ws_req(&hr)))
     {
       /* not a handshake as per RFC6455 */
       if (0>prepare_XXX_response(conn->buf_out, HTTP_501))
@@ -217,7 +252,8 @@ http_on_read(wschild_conn_t *conn)
       goto error;
     }
 
-  printf("%s", buf_ref(conn->buf_in));
+  /* TODO check ws protocol, key etc. switch into ws mode */
+
   buf_clear(conn->buf_in);
   goto success;
 
@@ -280,4 +316,52 @@ prepare_XXX_response(buf_t *b, const char *s)
   buf_fwd(b, strlen(s));
 
   return 1;
+}
+
+static int
+is_valid_ws_req(http_req_t *hr)
+{
+  if (NULL==hr->conn.start || NULL==hr->upgrade.start)
+    return 0;
+
+  trim(&(hr->conn));
+  if (0!=strncasecmp(hr->conn.start,
+                     FLD_CONNECTION_VAL,
+                     strlen(FLD_CONNECTION_VAL)))
+    return 0;
+
+  trim(&(hr->upgrade));
+  if (0!=strncasecmp(hr->upgrade.start,
+                     FLD_UPGRADE_VAL,
+                     strlen(FLD_UPGRADE_VAL)))
+    return 0;
+
+  return 1;
+}
+
+static void
+trim(char_range_t *r)
+{
+  int i=0;
+  while (r->len)
+    {
+      char c=*(r->start+i);
+      if (' '==c || '\t'==c)
+        {
+          r->start++;
+          r->len--;
+          i++;
+        }
+      else
+        break;
+    }
+
+  while (r->len)
+    {
+      char c=*(r->start+r->len-1); /* -1: 1st char at position zero */
+      if (' '==c || '\t'==c)
+        r->len--;
+      else
+        break;
+    }
 }

@@ -26,7 +26,8 @@
 static int num_pfd=0;
 static struct pollfd pfd[MAX_DESC];
 static wschild_conn_t conn[MAX_CONN];
-static const wsd_config_t *wsd_cfg=NULL;
+
+const wsd_config_t *wsd_cfg=NULL;
 
 /* forward declarations */
 static int on_accept(int fd);
