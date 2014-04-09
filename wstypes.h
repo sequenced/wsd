@@ -9,6 +9,7 @@ typedef struct
 {
   uid_t uid;
   char *name;
+  char *hostname;
   int sock;
   int port;
   int verbose;
