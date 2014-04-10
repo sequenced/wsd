@@ -103,3 +103,31 @@ buf_put(buf_t *b, char c)
   *(b->p+b->pos)=c;
   b->pos++;
 }
+
+
+inline void
+trim(string_t *r)
+{
+  int i=0;
+  while (r->len)
+    {
+      char c=*(r->start+i);
+      if (' '==c || '\t'==c)
+        {
+          r->start++;
+          r->len--;
+          i++;
+        }
+      else
+        break;
+    }
+
+  while (r->len)
+    {
+      char c=*(r->start+r->len-1); /* -1: 1st char at position zero */
+      if (' '==c || '\t'==c)
+        r->len--;
+      else
+        break;
+    }
+}

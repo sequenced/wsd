@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <poll.h>
+#include "ws.h"
 #include "http.h"
 
 #define HTTP_400 "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
@@ -19,33 +20,13 @@ static const char *FLD_CONNECTION_VAL="Upgrade";
 static const char *FLD_HOST="Host:";
 static const char *FLD_SEC_WS_KEY="Sec-WebSocket-Key:";
 static const char *FLD_SEC_WS_VER="Sec-WebSocket-Version:";
-static const char *FLD_SEC_WS_VER_VAL="13";
 static const char *FLD_SEC_WS_EXT="Sec-WebSocket-Extensions:";
 static const char *FLD_UPGRADE="Upgrade:";
 static const char *FLD_UPGRADE_VAL="websocket";
 static const char *FLD_ORIGIN="Origin:";
 
-/* as per RFC2616 section 5.1 */
-typedef struct
-{
-  char_range_t method;
-  char_range_t req_uri;
-  char_range_t http_ver;
-  char_range_t host;
-  char_range_t origin;
-  char_range_t user_agent;
-  char_range_t conn;
-  char_range_t upgrade;
-  char_range_t sec_ws_key;
-  char_range_t sec_ws_ver;
-  char_range_t sec_ws_ext;
-  int is_uri_abs;
-} http_req_t;
-
-static int is_valid_ws_req(http_req_t *hr);
 static int is_valid_req_line_syntax(http_req_t *hr);
-static int prepare_response(buf_t *b, const char *s);
-static void trim(char_range_t *r);
+static int is_valid_upgrade_req(http_req_t *hr);
 
 static inline int
 parse_el_crlf(buf_t *b)
@@ -98,7 +79,7 @@ parse_hdr_fld_value(buf_t *b)
 }
 
 static int
-parse_hdr_fld(buf_t *b, char_range_t *f)
+parse_hdr_fld(buf_t *b, string_t *f)
 {
   f->start=buf_ref(b);
   int len;
@@ -115,7 +96,7 @@ parse_req_hdr_flds(buf_t *b, http_req_t *hr)
   /* while not null line ('\r\n\r\n') */
   while (0!=strncmp(buf_ref(b), "\r\n", buf_len(b)<2?buf_len(b):2))
     {
-      char_range_t cr;
+      string_t cr;
       cr.start=buf_ref(b);
       while (0<buf_len(b) && ':'!=buf_get(b));
       cr.len=buf_ref(b)-cr.start;
@@ -179,7 +160,7 @@ parse_req_hdr_flds(buf_t *b, http_req_t *hr)
       else
         {
           /* ignore unrecognised fields */
-          char_range_t ignored;
+          string_t ignored;
           if (0>parse_hdr_fld(b, &ignored))
             return -1;
         }
@@ -232,14 +213,14 @@ http_on_read(wschild_conn_t *conn)
     {
       /* not enough data */
       buf_flip(conn->buf_in);
-      goto again;
+      /* try again */
+      return 1;
     }
 
   /* have three tokens terminated with `\r\n' (see RFC2616 section 5.1) */
   if (!is_valid_req_line_syntax(&hr))
     {
-      if (0>prepare_response(conn->buf_out, HTTP_501))
-        /* request wrong, can't prepare response so bail out */
+      if (0>http_prepare_response(conn->buf_out, HTTP_501))
         return -1;
 
       goto error;
@@ -248,7 +229,7 @@ http_on_read(wschild_conn_t *conn)
   if (0>(rv=parse_req_hdr_flds(conn->buf_in, &hr)))
     {
       /* parse error in header fields */
-      if (0>prepare_response(conn->buf_out, HTTP_500))
+      if (0>http_prepare_response(conn->buf_out, HTTP_500))
         return -1;
 
       goto error;
@@ -257,7 +238,7 @@ http_on_read(wschild_conn_t *conn)
   if (NULL==hr.host.start)
     {
       /* HTTP 1.1 requires `Host:' header field (RFC2616 section 14.23) */
-      if (0>prepare_response(conn->buf_out, HTTP_400))
+      if (0>http_prepare_response(conn->buf_out, HTTP_400))
         return -1;
 
       goto error;
@@ -265,19 +246,19 @@ http_on_read(wschild_conn_t *conn)
 
   /* TODO check value of `Host:' header field */
 
-  if (0>(is_valid_ws_req(&hr)))
+  if (!is_valid_upgrade_req(&hr))
     {
-      /* not a handshake as per RFC6455 */
-      if (0>prepare_response(conn->buf_out, HTTP_501))
+      /* not an upgrade request as per RFC6455 */
+      if (0>http_prepare_response(conn->buf_out, HTTP_501))
         return -1;
 
       goto error;
     }
 
-  /* TODO check ws protocol, key etc. switch into ws mode */
+  if (0>ws_on_handshake(conn, &hr))
+    return -1;
 
-  buf_clear(conn->buf_in);
-  goto success;
+  return 1;
 
  error:
   buf_clear(conn->buf_in);
@@ -285,15 +266,12 @@ http_on_read(wschild_conn_t *conn)
   conn->pfd->events|=POLLOUT;
   conn->close_on_write=1;
 
- again:
- success:
   return 1;
 }
 
 int
 http_on_write(wschild_conn_t *conn)
 {
-  
   return -1;
 }
 
@@ -327,8 +305,8 @@ is_valid_req_line_syntax(http_req_t *hr)
   return 1;
 }
 
-static int
-prepare_response(buf_t *b, const char *s)
+int
+http_prepare_response(buf_t *b, const char *s)
 {
   /* see RFC2616 section 6.1.1 */
   if (buf_len(b)<(strlen(s)))
@@ -341,12 +319,11 @@ prepare_response(buf_t *b, const char *s)
 }
 
 static int
-is_valid_ws_req(http_req_t *hr)
+is_valid_upgrade_req(http_req_t *hr)
 {
   /* see RFC6455 section 4.2.1 */
   if (NULL==hr->conn.start
-      || NULL==hr->upgrade.start
-      || NULL==hr->sec_ws_ver.start)
+      || NULL==hr->upgrade.start)
     return 0;
 
   trim(&(hr->conn));
@@ -361,37 +338,5 @@ is_valid_ws_req(http_req_t *hr)
                      strlen(FLD_UPGRADE_VAL)))
     return 0;
 
-  trim(&(hr->sec_ws_ver));
-  if (0!=strcmp(hr->sec_ws_ver.start,
-                FLD_SEC_WS_VER_VAL))
-    return 0;
-
   return 1;
-}
-
-static void
-trim(char_range_t *r)
-{
-  int i=0;
-  while (r->len)
-    {
-      char c=*(r->start+i);
-      if (' '==c || '\t'==c)
-        {
-          r->start++;
-          r->len--;
-          i++;
-        }
-      else
-        break;
-    }
-
-  while (r->len)
-    {
-      char c=*(r->start+r->len-1); /* -1: 1st char at position zero */
-      if (' '==c || '\t'==c)
-        r->len--;
-      else
-        break;
-    }
 }

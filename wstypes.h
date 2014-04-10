@@ -20,7 +20,7 @@ typedef struct
 {
   char *start;
   int len;
-} char_range_t;
+} string_t;
 
 typedef struct
 {
@@ -30,18 +30,6 @@ typedef struct
   int limit;
   char swap;
 } buf_t;
-
-buf_t* buf_alloc(int capacity);
-void buf_free(buf_t *b);
-void buf_clear(buf_t *b);
-void buf_rwnd(buf_t *b, int len);
-void buf_fwd(buf_t *b, int len);
-void buf_put(buf_t *b, char c);
-char buf_get(buf_t *b);
-char* buf_ref(buf_t *b);
-int buf_len(buf_t *b);
-int buf_pos(buf_t *b);
-char* buf_flip(buf_t *b);
 
 struct wschild_conn
 {
@@ -53,5 +41,36 @@ struct wschild_conn
   int close_on_write;
 };
 typedef struct wschild_conn wschild_conn_t;
+
+/* as per RFC2616 section 5.1 */
+typedef struct
+{
+  string_t method;
+  string_t req_uri;
+  string_t http_ver;
+  string_t host;
+  string_t origin;
+  string_t user_agent;
+  string_t conn;
+  string_t upgrade;
+  string_t sec_ws_key;
+  string_t sec_ws_ver;
+  string_t sec_ws_ext;
+  int is_uri_abs;
+} http_req_t;
+
+/* trims whitespace from beginning and end of string */
+void trim(string_t *r);
+buf_t* buf_alloc(int capacity);
+void buf_free(buf_t *b);
+void buf_clear(buf_t *b);
+void buf_rwnd(buf_t *b, int len);
+void buf_fwd(buf_t *b, int len);
+void buf_put(buf_t *b, char c);
+char buf_get(buf_t *b);
+char* buf_ref(buf_t *b);
+int buf_len(buf_t *b);
+int buf_pos(buf_t *b);
+char* buf_flip(buf_t *b);
 
 #endif /* #ifndef __WSTYPES_H__ */
