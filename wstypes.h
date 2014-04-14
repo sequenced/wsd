@@ -4,6 +4,7 @@
 #include <sys/types.h>
 
 #define UNASSIGNED (-1)
+#define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
 
 typedef struct
 {

@@ -6,7 +6,6 @@
 
 #define HTTP_400 "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
 #define HTTP_501 "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n"
-#define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
 
 extern const wsd_config_t *wsd_cfg;
 
