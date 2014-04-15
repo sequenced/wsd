@@ -67,6 +67,9 @@ conn_free(int slot)
   if (slot>=MAX_CONN)
     return -1;
 
+  buf_free(conn[slot].buf_in);
+  buf_free(conn[slot].buf_out);
+
   for (;slot<(MAX_CONN-1); slot++)
     {
       conn[slot].pfd=conn[slot+1].pfd;

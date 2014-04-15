@@ -11,6 +11,7 @@ wsd_config_t *wsd_cfg;
 static const char *VER="13";
 static const char *KEY="dGhlIHNhbXBsZSBub25jZQ==";
 static const char *EXPECTED_ACCEPT_VAL="s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
+static const int EXPECTED_RET_VAL=1;
 
 int
 main(int argc, char **argv)
@@ -29,10 +30,11 @@ main(int argc, char **argv)
   hr.sec_ws_key.start=KEY;
   hr.sec_ws_key.len=strlen(KEY);
 
-  ws_on_handshake(&wsc, &hr);
+  int rv=ws_on_handshake(&wsc, &hr);
 
-  buf_flip(wsc.buf_out);
-  printf("%s", buf_ref(wsc.buf_out));
+  assert(rv==EXPECTED_RET_VAL);
+  assert(NULL!=strstr(buf_ref(wsc.buf_out), EXPECTED_ACCEPT_VAL));
+  assert(wsc.pfd->events&POLLOUT);
 
   return 0;
 }

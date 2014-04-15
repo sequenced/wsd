@@ -9,6 +9,7 @@
 #include "http.h"
 #include "ws.h"
 
+#define SCRATCH_SIZE 64
 #define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 #define WS_ACCEPT_KEY_LEN 28
 #define HTTP_400 "HTTP/1.1 400 Bad Request\r\nSec-WebSocket-Version: 13\r\nContent-Length: 0\r\n\r\n"
@@ -37,17 +38,22 @@ prepare_handshake(buf_t *b, http_req_t *hr)
   int len=strlen(HTTP_101);
   if (buf_len(b)<len)
     return -1;
+  int old_pos=buf_pos(b);
   strcpy(buf_ref(b), HTTP_101);
   buf_fwd(b, len);
 
   len=WS_ACCEPT_KEY_LEN+2; /* +2: `\r\n' */
   if (buf_len(b)<len)
-    return -1;
+    goto error;
 
   if (0>generate_accept_val(b, hr))
-    return -1;
+    goto error;
 
   return 1;
+
+ error:
+  buf_rwnd(b, buf_pos(b)-old_pos);
+  return -1;
 }
 
 static int
@@ -55,24 +61,28 @@ generate_accept_val(buf_t *b, http_req_t *hr)
 {
   trim(&(hr->sec_ws_key));
 
-  char *scratch=malloc(128);
-  memset(scratch, 0x0, 128);
+  /* concatenate as per RFC6455 section 4.2.2 */
+  char scratch[SCRATCH_SIZE];
+  memset(scratch, 0x0, SCRATCH_SIZE);
   strncpy(scratch, hr->sec_ws_key.start, hr->sec_ws_key.len);
   strcpy((char*)(scratch+hr->sec_ws_key.len), WS_GUID);
-  unsigned char *md=SHA1((unsigned char*)scratch, strlen(scratch), NULL);
+
+  unsigned char *md=SHA1((unsigned char*)scratch,
+                         strlen(scratch),
+                         NULL);
 
   BIO *bio, *b64;
   BUF_MEM *p;
   b64=BIO_new(BIO_f_base64());
   bio=BIO_new(BIO_s_mem());
-  bio=BIO_push(b64, bio);
-  BIO_write(bio, md, SHA_DIGEST_LENGTH);
-  BIO_flush(bio);
-  BIO_get_mem_ptr(bio, &p);
+  b64=BIO_push(b64, bio);
+  BIO_write(b64, md, SHA_DIGEST_LENGTH);
+  BIO_flush(b64);
+  BIO_get_mem_ptr(b64, &p);
   memcpy(buf_ref(b), p->data, p->length-1);
   buf_fwd(b, p->length-1);
 
-  BIO_free_all(bio);
+  BIO_free_all(b64);
 
   buf_put(b, '\r');
   buf_put(b, '\n');
@@ -103,15 +113,11 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
     {
       if (0>http_prepare_response(conn->buf_out, HTTP_500))
         return -1;
-
-      buf_clear(conn->buf_in);
-      buf_flip(conn->buf_out);
-      conn->pfd->events|=POLLOUT;
-
-      return 1;
     }
 
   buf_clear(conn->buf_in);
+  buf_flip(conn->buf_out);
+  conn->pfd->events|=POLLOUT;
 
   return 1;
 }
