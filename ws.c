@@ -14,6 +14,10 @@
 #define WS_ACCEPT_KEY_LEN 28
 #define HTTP_400 "HTTP/1.1 400 Bad Request\r\nSec-WebSocket-Version: 13\r\nContent-Length: 0\r\n\r\n"
 #define HTTP_101 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
+#define WS_VER "Sec-WebSocket-Version: "
+#define WS_PROTO "Sec-WebSocket-Protocol: "
+
+extern const wsd_config_t *wsd_cfg;
 
 static const char *FLD_SEC_WS_VER_VAL="13";
 
@@ -45,9 +49,36 @@ prepare_handshake(buf_t *b, http_req_t *hr)
   len=WS_ACCEPT_KEY_LEN+2; /* +2: `\r\n' */
   if (buf_len(b)<len)
     goto error;
-
   if (0>generate_accept_val(b, hr))
     goto error;
+
+  len=strlen(WS_VER)+strlen(FLD_SEC_WS_VER_VAL)+2; /* +2 `\r\n' */
+  if (buf_len(b)<len)
+    goto error;
+  strcpy(buf_ref(b), WS_VER);
+  buf_fwd(b, strlen(WS_VER));
+  strcpy(buf_ref(b), FLD_SEC_WS_VER_VAL);
+  buf_fwd(b, strlen(FLD_SEC_WS_VER_VAL));
+  buf_put(b, '\r');
+  buf_put(b, '\n');
+
+  /* TODO for now echo back requested protocol */
+  trim(&(hr->sec_ws_proto));
+  len=strlen(WS_PROTO)+hr->sec_ws_proto.len+2; /* +2 `\r\n' */
+  if (buf_len(b)<len)
+    goto error;
+  strcpy(buf_ref(b), WS_PROTO);
+  buf_fwd(b, strlen(WS_PROTO));
+  strncpy(buf_ref(b), hr->sec_ws_proto.start, hr->sec_ws_proto.len);
+  buf_fwd(b, hr->sec_ws_proto.len);
+  buf_put(b, '\r');
+  buf_put(b, '\n');
+
+  /* terminating response as per RFC2616 section 6 */
+  if (buf_len(b)<2)
+    goto error;
+  buf_put(b, '\r');
+  buf_put(b, '\n');
 
   return 1;
 
@@ -77,7 +108,7 @@ generate_accept_val(buf_t *b, http_req_t *hr)
   bio=BIO_new(BIO_s_mem());
   b64=BIO_push(b64, bio);
   BIO_write(b64, md, SHA_DIGEST_LENGTH);
-  BIO_flush(b64);
+  (void)BIO_flush(b64);
   BIO_get_mem_ptr(b64, &p);
   memcpy(buf_ref(b), p->data, p->length-1);
   buf_fwd(b, p->length-1);
@@ -105,6 +136,9 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
       return 1;
     }
 
+  /* TODO check requested protocol */
+  /* TODO check requested resource */
+
   /* handshake syntactically and semantically correct */
 
   assert(buf_pos(conn->buf_out)==0);
@@ -115,6 +149,10 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
         return -1;
     }
 
+  /* switch into websocket mode */
+  conn->on_read=ws_on_read;
+  conn->on_write=ws_on_write;
+
   buf_clear(conn->buf_in);
   buf_flip(conn->buf_out);
   conn->pfd->events|=POLLOUT;
@@ -123,13 +161,21 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
 }
 
 int
-on_read(wschild_conn_t *conn)
+ws_on_read(wschild_conn_t *conn)
 {
-  return -1;
+  buf_flip(conn->buf_in);
+
+  if (wsd_cfg->verbose)
+    printf("%s", buf_ref(conn->buf_in));
+
+  /* TODO start processing */
+  buf_clear(conn->buf_in);
+
+  return 1;
 }
 
 int
-on_write(wschild_conn_t *conn)
+ws_on_write(wschild_conn_t *conn)
 {
   return -1;
 }

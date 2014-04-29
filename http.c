@@ -20,6 +20,7 @@ static const char *FLD_HOST="Host:";
 static const char *FLD_SEC_WS_KEY="Sec-WebSocket-Key:";
 static const char *FLD_SEC_WS_VER="Sec-WebSocket-Version:";
 static const char *FLD_SEC_WS_EXT="Sec-WebSocket-Extensions:";
+static const char *FLD_SEC_WS_PROTO="Sec-WebSocket-Protocol:";
 static const char *FLD_UPGRADE="Upgrade:";
 static const char *FLD_UPGRADE_VAL="websocket";
 static const char *FLD_ORIGIN="Origin:";
@@ -154,6 +155,13 @@ parse_req_hdr_flds(buf_t *b, http_req_t *hr)
                               strlen(FLD_ORIGIN)))
         {
           if (0>parse_hdr_fld(b, &(hr->origin)))
+            return -1;
+        }
+      else if (0==strncasecmp(cr.start,
+                              FLD_SEC_WS_PROTO,
+                              strlen(FLD_SEC_WS_PROTO)))
+        {
+          if (0>parse_hdr_fld(b, &(hr->sec_ws_proto)))
             return -1;
         }
       else

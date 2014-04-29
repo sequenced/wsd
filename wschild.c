@@ -216,6 +216,9 @@ on_accept(int fd)
 static int
 on_write(wschild_conn_t *conn)
 {
+  if (wsd_cfg->verbose)
+    printf("%s", buf_ref(conn->buf_out));
+
   int len;
   len=write(conn->pfd->fd,
             buf_ref(conn->buf_out),

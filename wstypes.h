@@ -19,7 +19,7 @@ typedef struct
 
 typedef struct
 {
-  char *start;
+  const char *start;
   int len;
 } string_t;
 
@@ -57,6 +57,7 @@ typedef struct
   string_t sec_ws_key;
   string_t sec_ws_ver;
   string_t sec_ws_ext;
+  string_t sec_ws_proto;
   int is_uri_abs;
 } http_req_t;
 
