@@ -75,4 +75,13 @@ int buf_len(buf_t *b);
 int buf_pos(buf_t *b);
 char* buf_flip(buf_t *b);
 
+typedef struct __attribute__ ((__packed__))
+{
+  char byte1;
+  char byte2;
+  char byte3;
+  char byte5;
+  char byte11;
+} wsframe_t;
+
 #endif /* #ifndef __WSTYPES_H__ */

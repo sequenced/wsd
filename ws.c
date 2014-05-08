@@ -2,6 +2,8 @@
 #include <poll.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <endian.h>
+#include <sys/types.h>
 #include <openssl/sha.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
@@ -16,6 +18,23 @@
 #define HTTP_101 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
 #define WS_VER "Sec-WebSocket-Version: "
 #define WS_PROTO "Sec-WebSocket-Protocol: "
+#define FIN_BIT(byte) (0x1&byte)
+#define RSV1_BIT(byte) (0x2&byte)
+#define RSV2_BIT(byte) (0x4&byte)
+#define RSV3_BIT(byte) (0x8&byte)
+#define OPCODE(byte) ((0xf0&byte)>>4)
+#define MASK_BIT(byte) (0x1&byte)
+#define PAYLOAD_LEN(byte) (unsigned long)((0xfe&byte)>>1)
+/* #define PAYLOAD_LEN16(frame)                                            \ */
+/*   ((unsigned long int)be16toh(*(unsigned short*)(frame->byte3))) */
+/* #define PAYLOAD_LEN64(frame)                                    \ */
+/*   ((unsigned long int)be64toh(*(unsigned long*)(frame->byte3))) */
+#define MASKING_KEY(p) *((unsigned int*)(p))
+/* #define MASKING_KEY16(frame) (unsigned int)*(unsigned int*)(frame->byte5) */
+/* #define MASKING_KEY64(frame) (unsigned int)*(unsigned int*)(frame->byte11) */
+#define WS_FRAME_LENGTH    6
+#define WS_FRAME_LENGTH16  8
+#define WS_FRAME_LENGTH64 16
 
 extern const wsd_config_t *wsd_cfg;
 
@@ -165,10 +184,76 @@ ws_on_read(wschild_conn_t *conn)
 {
   buf_flip(conn->buf_in);
 
+  printf("len=%d\n", buf_len(conn->buf_in));
+
+  /* TODO check total frame length */
+
+  unsigned char b1=buf_get(conn->buf_in);
+  unsigned char b2=buf_get(conn->buf_in);
+
+  printf("b1=0x%x, b2=0x%x\n", b1, b2);
+
+  if (RSV1_BIT(b1)!=0
+      || RSV2_BIT(b1)!=0
+      || RSV3_BIT(b1)!=0
+      || MASK_BIT(b2)==0)
+    {
+      /* TODO fail connection */
+    }
+
+  int frame_len=4;
+  unsigned int mask_key=MASKING_KEY(buf_ref(conn->buf_in));
+  unsigned long payload_len=PAYLOAD_LEN(b2);
+  /* if (payload_len==126) */
+  /*   { */
+  /*     frame_len=WS_FRAME_LENGTH16; */
+  /*     mask_key=MASKING_KEY16(wsf); */
+  /*     payload_len=PAYLOAD_LEN16(wsf); */
+  /*   } */
+  /* else if (payload_len==127) */
+  /*   { */
+  /*     frame_len=WS_FRAME_LENGTH64; */
+  /*     mask_key=MASKING_KEY64(wsf); */
+  /*     payload_len=PAYLOAD_LEN64(wsf); */
+  /*   } */
+
+  /* TODO check that payload64 has left-most bit off */
+
   if (wsd_cfg->verbose)
-    printf("%s", buf_ref(conn->buf_in));
+    printf("ws frame: %d (fin), 0x%x (opcode), %d (mask), %lu (len)\n",
+           FIN_BIT(b1),
+           OPCODE(b1),
+           MASK_BIT(b2),
+           payload_len);
+
+  buf_fwd(conn->buf_in, frame_len);
+
+  buf_t *plaintext=buf_alloc(64);
+  int j=0;
+  int i;
+  for (i=0; i<payload_len; i++)
+    {
+      char b=buf_get(conn->buf_in);
+      buf_rwnd(conn->buf_in, 1);
+      j=i%4;
+      unsigned char mask;
+      if (j==0)
+        mask=(unsigned char)(mask_key&0x000000ff);
+      else if (j==1)
+        mask=(unsigned char)((mask_key&0x0000ff00)>>8);
+      else if (j==2)
+        mask=(unsigned char)((mask_key&0x00ff0000)>>16);
+      else
+        mask=(unsigned char)((mask_key&0xff000000)>>24);
+
+      buf_put(plaintext, (b^mask));
+    }
 
   /* TODO start processing */
+
+  buf_flip(plaintext);
+  printf("%s", buf_ref(plaintext));
+
   buf_clear(conn->buf_in);
 
   return 1;
