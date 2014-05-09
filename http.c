@@ -335,6 +335,7 @@ is_valid_upgrade_req(http_req_t *hr)
 
   trim(&(hr->conn));
 
+  /* request header fields can have multiple values; see RFC2616 section 4.2 */
   int match=0;
   string_t *token=tok(&(hr->conn), ',');
 
