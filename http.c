@@ -334,15 +334,30 @@ is_valid_upgrade_req(http_req_t *hr)
     return 0;
 
   trim(&(hr->conn));
-  if (0!=strncasecmp(hr->conn.start,
-                     FLD_CONNECTION_VAL,
-                     strlen(FLD_CONNECTION_VAL)))
+
+  int match=0;
+  string_t *token=tok(&(hr->conn), ',');
+
+  while (0<token->len)
+    {
+      trim(token);
+      if (0==strncasecmp(token->start,
+                         FLD_CONNECTION_VAL,
+                         token->len))
+        {
+          match=1;
+        }
+ 
+      token=tok(NULL, ',');
+    }
+
+  if (!match)
     return 0;
 
   trim(&(hr->upgrade));
   if (0!=strncasecmp(hr->upgrade.start,
                      FLD_UPGRADE_VAL,
-                     strlen(FLD_UPGRADE_VAL)))
+                     hr->upgrade.len))
     return 0;
 
   return 1;
