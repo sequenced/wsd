@@ -62,7 +62,8 @@ typedef struct
 } http_req_t;
 
 /* trims whitespace from beginning and end of string */
-void trim(string_t *r);
+void trim(string_t *str);
+string_t *tok(string_t *str, const char del);
 buf_t* buf_alloc(int capacity);
 void buf_free(buf_t *b);
 void buf_clear(buf_t *b);

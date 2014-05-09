@@ -106,28 +106,63 @@ buf_put(buf_t *b, char c)
 
 
 inline void
-trim(string_t *r)
+trim(string_t *str)
 {
   int i=0;
-  while (r->len)
+  while (str->len)
     {
-      char c=*(r->start+i);
+      char c=*(str->start+i);
       if (' '==c || '\t'==c)
         {
-          r->start++;
-          r->len--;
+          str->start++;
+          str->len--;
           i++;
         }
       else
         break;
     }
 
-  while (r->len)
+  while (str->len)
     {
-      char c=*(r->start+r->len-1); /* -1: 1st char at position zero */
+      char c=*(str->start+str->len-1); /* -1: 1st char at position zero */
       if (' '==c || '\t'==c)
-        r->len--;
+        str->len--;
       else
         break;
     }
+}
+
+string_t *
+tok(string_t *str, const char del)
+{
+  static int pos=0;
+  static string_t rv;
+  static string_t *s;
+  if (NULL!=str)
+    {
+      s=str;
+      pos=0;
+    }
+
+  if (pos==s->len)
+    {
+      rv.len=(-1); /* end of input string reached */
+      return &rv;
+    }
+
+  rv.start=(s->start+pos);
+  rv.len=0;
+  while (pos<s->len)
+    {
+      if (del==*(s->start+pos))
+        {
+          pos++; /* move past delimiter for next call */
+          break;
+        }
+
+      rv.len++;
+      pos++;
+    }
+
+  return &rv;
 }
