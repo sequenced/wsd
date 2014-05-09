@@ -1,19 +1,25 @@
-all: .dep wsd test
+all: .dep wsd test check
 
 include .dep
 
-.PHONY:	clean test
+.PHONY:	clean test check
 
 CFLAGS = -Wall -ggdb -I. -L.
 
 wsd:	wsd.o wschild.o http.o ws.o wstypes.o
 	$(CC) $(CFLAGS) -lrt -lssl $^ -o $@
 
-test:	test/test1
+test:	test/test1 test/test2
 
 test/test1:	test/test1.o ws.o http.o wstypes.o
 	$(CC) $(CFLAGS) -lrt -lssl $^ -o $@
+
+test/test2:	test/test2.o wstypes.o
+	$(CC) $(CFLAGS) -lrt -lssl $^ -o $@
+
+check:
 	test/test1
+	test/test2
 
 clean:
 	rm -f *.o test/*.o .dep wsd test/test*
