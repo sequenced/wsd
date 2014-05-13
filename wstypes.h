@@ -71,18 +71,21 @@ void buf_rwnd(buf_t *b, int len);
 void buf_fwd(buf_t *b, int len);
 void buf_put(buf_t *b, char c);
 char buf_get(buf_t *b);
+short buf_get_short(buf_t *b);
+int buf_get_int(buf_t *b);
+long buf_get_long(buf_t *b);
 char* buf_ref(buf_t *b);
 int buf_len(buf_t *b);
 int buf_pos(buf_t *b);
+void buf_set_pos(buf_t *b, int pos);
 char* buf_flip(buf_t *b);
 
-typedef struct __attribute__ ((__packed__))
+typedef struct
 {
   char byte1;
   char byte2;
-  char byte3;
-  char byte5;
-  char byte11;
+  unsigned long payload_len;
+  unsigned int masking_key;
 } wsframe_t;
 
 #endif /* #ifndef __WSTYPES_H__ */

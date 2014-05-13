@@ -46,6 +46,8 @@ static const char *FLD_SEC_WS_VER_VAL="13";
 static int is_valid_ver(http_req_t *hr);
 static int prepare_handshake(buf_t *b, http_req_t *hr);
 static int generate_accept_val(buf_t *b, http_req_t *hr);
+static int fill_in_wsframe_details(buf_t *b, wsframe_t *wsf);
+static void decode(buf_t *b, wsframe_t *wsf);
 
 static int
 is_valid_ver(http_req_t *hr)
@@ -189,66 +191,45 @@ ws_on_read(wschild_conn_t *conn)
 
   if (buf_len(conn->buf_in)<WS_FRAME_LEN)
     /* need at least WS_FRAME_LEN bytes; see RFC6455 section 5.2 */
-    /* TODO fail connection */
+    /* TODO retry */
     return 1;
 
-  unsigned char b1=buf_get(conn->buf_in);
-  unsigned char b2=buf_get(conn->buf_in);
+  wsframe_t wsf;
+  memset(&wsf, 0x0, sizeof(wsframe_t));
+  wsf.byte1=buf_get(conn->buf_in);
+  wsf.byte2=buf_get(conn->buf_in);
 
-  if (wsd_cfg->verbose)
-    printf("ws frame: 0x%x 0x%x\n", b1, b2);
-
-  if (RSV1_BIT(b1)!=0
-      || RSV2_BIT(b1)!=0
-      || RSV3_BIT(b1)!=0
-      || MASK_BIT(b2)==0)
+  /* see RFC6455 section 5.2 */
+  if (RSV1_BIT(wsf.byte1)!=0
+      || RSV2_BIT(wsf.byte1)!=0
+      || RSV3_BIT(wsf.byte1)!=0
+      || MASK_BIT(wsf.byte2)==0)
     {
       /* TODO fail connection */
     }
 
-  unsigned int mask_key=MASKING_KEY(buf_ref(conn->buf_in));
-  buf_fwd(conn->buf_in, WS_MASKING_KEY_LEN);  
+  if (0>fill_in_wsframe_details(conn->buf_in, &wsf))
+    /* TODO retry */
+    return 1;
 
-  unsigned long payload_len=PAYLOAD_LEN(b2);
-  /* if (payload_len==126) */
-  /*   { */
-  /*     frame_len=WS_FRAME_LENGTH16; */
-  /*     mask_key=MASKING_KEY16(wsf); */
-  /*     payload_len=PAYLOAD_LEN16(wsf); */
-  /*   } */
-  /* else if (payload_len==127) */
-  /*   { */
-  /*     frame_len=WS_FRAME_LENGTH64; */
-  /*     mask_key=MASKING_KEY64(wsf); */
-  /*     payload_len=PAYLOAD_LEN64(wsf); */
-  /*   } */
+  if (wsd_cfg->verbose)
+    printf("ws frame: 0x%hhx, 0x%hhx, 0x%x (key), 0x%ld (len)\n",
+           wsf.byte1,
+           wsf.byte2,
+           wsf.masking_key,
+           wsf.payload_len);
 
   /* TODO check that payload64 has left-most bit off */
 
-  buf_t *plaintext=buf_alloc(64);
-  int j=0;
-  int i;
-  for (i=0; i<payload_len; i++)
-    {
-      char b=buf_get(conn->buf_in);
-      j=i%4;
-      unsigned char mask;
-      if (j==0)
-        mask=(unsigned char)(mask_key&0x000000ff);
-      else if (j==1)
-        mask=(unsigned char)((mask_key&0x0000ff00)>>8);
-      else if (j==2)
-        mask=(unsigned char)((mask_key&0x00ff0000)>>16);
-      else
-        mask=(unsigned char)((mask_key&0xff000000)>>24);
+  if (buf_len(conn->buf_in)<wsf.payload_len)
+    /* TODO retry */
+    return 1;
 
-      buf_put(plaintext, (b^mask));
-    }
+  decode(conn->buf_in, &wsf);
 
   /* TODO start processing */
 
-  buf_flip(plaintext);
-  printf("***%s\n", buf_ref(plaintext));
+  printf("***%s\n", buf_ref(conn->buf_in));
 
   buf_clear(conn->buf_in);
 
@@ -259,4 +240,63 @@ int
 ws_on_write(wschild_conn_t *conn)
 {
   return -1;
+}
+
+static void
+decode(buf_t *buf, wsframe_t *wsf)
+{
+  int pos=buf_pos(buf);
+  int j=0;
+  int i;
+  for (i=0; i<wsf->payload_len; i++)
+    {
+      char b=buf_get(buf);
+      j=i%4;
+      unsigned char mask;
+      if (j==0)
+        mask=(unsigned char)(wsf->masking_key&0x000000ff);
+      else if (j==1)
+        mask=(unsigned char)((wsf->masking_key&0x0000ff00)>>8);
+      else if (j==2)
+        mask=(unsigned char)((wsf->masking_key&0x00ff0000)>>16);
+      else
+        mask=(unsigned char)((wsf->masking_key&0xff000000)>>24);
+
+      buf_rwnd(buf, 1);
+      buf_put(buf, (b^mask));
+    }
+
+  buf_set_pos(buf, pos);
+}
+
+static int
+fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
+{
+  /* extended payload length; see RFC6455 section 5.2 */
+  wsf->payload_len=PAYLOAD_LEN(wsf->byte2);
+  if (wsf->payload_len<126)
+    {
+      if (buf_len(b)<4)
+        return -1;
+
+      wsf->masking_key=buf_get_int(b);
+    }
+  else if (wsf->payload_len==126)
+    {
+      if (buf_len(b)<(2+4))
+        return -1;
+
+      wsf->payload_len=buf_get_short(b);
+      wsf->masking_key=buf_get_int(b);
+    }
+  else if (wsf->payload_len==127)
+    {
+      if (buf_len(b)<(2+8))
+        return -1;
+
+      wsf->payload_len=buf_get_long(b);
+      wsf->masking_key=buf_get_int(b);
+    }
+
+  return 0;
 }

@@ -166,3 +166,34 @@ tok(string_t *str, const char del)
 
   return &rv;
 }
+
+short
+buf_get_short(buf_t *b)
+{
+  short s=*((short*)(b->p+b->pos));
+  b->pos+=2;
+  return s;
+
+}
+
+long
+buf_get_long(buf_t *b)
+{
+  long l=*((long*)(b->p+b->pos));
+  b->pos+=8;
+  return l;
+}
+
+int
+buf_get_int(buf_t *b)
+{
+  int k=*((int*)(b->p+b->pos));
+  b->pos+=4;
+  return k;
+}
+
+void
+buf_set_pos(buf_t *b, int pos)
+{
+  b->pos=pos;
+}
