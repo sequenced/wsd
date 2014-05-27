@@ -24,13 +24,13 @@
 #define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 #define WS_VER "Sec-WebSocket-Version: "
 #define WS_PROTO "Sec-WebSocket-Protocol: "
-#define FIN_BIT(byte) (0x1&byte)
-#define RSV1_BIT(byte) (0x2&byte)
-#define RSV2_BIT(byte) (0x4&byte)
-#define RSV3_BIT(byte) (0x8&byte)
-#define OPCODE(byte) ((0xf0&byte)>>4)
-#define MASK_BIT(byte) (0x1&byte)
-#define PAYLOAD_LEN(byte) (unsigned long)((0xfe&byte)>>1)
+#define FIN_BIT(byte) (0x80&byte)
+#define RSV1_BIT(byte) (0x40&byte)
+#define RSV2_BIT(byte) (0x20&byte)
+#define RSV3_BIT(byte) (0x10&byte)
+#define OPCODE(byte) (0xf&byte)
+#define MASK_BIT(byte) (0x80&byte)
+#define PAYLOAD_LEN(byte) (unsigned long)(0x7f&byte)
 /* #define PAYLOAD_LEN16(frame)                                            \ */
 /*   ((unsigned long int)be16toh(*(unsigned short*)(frame->byte3))) */
 /* #define PAYLOAD_LEN64(frame)                                    \ */
@@ -213,7 +213,7 @@ ws_on_read(wschild_conn_t *conn)
     return 1;
 
   if (wsd_cfg->verbose)
-    printf("ws frame: 0x%hhx, 0x%hhx, 0x%x (key), 0x%ld (len)\n",
+    printf("ws frame: 0x%hhx, 0x%hhx, 0x%x (key), %ld (len)\n",
            wsf.byte1,
            wsf.byte2,
            wsf.masking_key,
@@ -262,6 +262,7 @@ decode(buf_t *buf, wsframe_t *wsf)
       else
         mask=(unsigned char)((wsf->masking_key&0xff000000)>>24);
 
+      /* decode in-place */
       buf_rwnd(buf, 1);
       buf_put(buf, (b^mask));
     }
