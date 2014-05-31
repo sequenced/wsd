@@ -10,6 +10,7 @@
 #include <openssl/buffer.h>
 #include "http.h"
 #include "ws.h"
+#include "chat1.h"
 
 #define HTTP_400 "HTTP/1.1 400 Bad Request\r\nSec-WebSocket-Version: 13\r\nContent-Length: 0\r\n\r\n"
 #define HTTP_101 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
@@ -44,10 +45,15 @@ extern const wsd_config_t *wsd_cfg;
 static const char *FLD_SEC_WS_VER_VAL="13";
 
 static int is_valid_ver(http_req_t *hr);
+static int is_valid_proto(http_req_t *hr);
 static int prepare_handshake(buf_t *b, http_req_t *hr);
 static int generate_accept_val(buf_t *b, http_req_t *hr);
 static int fill_in_wsframe_details(buf_t *b, wsframe_t *wsf);
 static void decode(buf_t *b, wsframe_t *wsf);
+static void on_close(buf_t *b, wsframe_t *wsf);
+static void on_ping(buf_t *b, wsframe_t *wsf);
+static void on_pong(buf_t *b, wsframe_t *wsf);
+static int start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf);
 
 static int
 is_valid_ver(http_req_t *hr)
@@ -148,7 +154,8 @@ generate_accept_val(buf_t *b, http_req_t *hr)
 int
 ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
 {
-  if (0>(is_valid_ver(hr)))
+  if (!is_valid_ver(hr)
+      || !is_valid_proto(hr))
     {
       if (0>http_prepare_response(conn->buf_out, HTTP_400))
         return -1;
@@ -160,7 +167,6 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
       return 1;
     }
 
-  /* TODO check requested protocol */
   /* TODO check requested resource */
 
   /* handshake syntactically and semantically correct */
@@ -176,6 +182,8 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
   /* switch into websocket mode */
   conn->on_read=ws_on_read;
   conn->on_write=ws_on_write;
+  /* TODO lookup protocol */
+  conn->on_data_frame=chat1_on_frame;
 
   buf_clear(conn->buf_in);
   buf_flip(conn->buf_out);
@@ -213,11 +221,10 @@ ws_on_read(wschild_conn_t *conn)
     return 1;
 
   if (wsd_cfg->verbose)
-    printf("ws frame: 0x%hhx, 0x%hhx, 0x%x (key), %ld (len)\n",
+    printf("ws frame: 0x%hhx, 0x%hhx, 0x%x (opcode)\n",
            wsf.byte1,
            wsf.byte2,
-           wsf.masking_key,
-           wsf.payload_len);
+           OPCODE(wsf.byte1));
 
   /* TODO check that payload64 has left-most bit off */
 
@@ -227,11 +234,21 @@ ws_on_read(wschild_conn_t *conn)
 
   decode(conn->buf_in, &wsf);
 
-  /* TODO start processing */
+  if (0x8==OPCODE(wsf.byte1))
+    on_close(conn->buf_in, &wsf);
+  else if (0x9==OPCODE(wsf.byte1))
+    on_ping(conn->buf_in, &wsf);
+  else if (0xa==OPCODE(wsf.byte1))
+    on_pong(conn->buf_in, &wsf);
+  else if (0x0==OPCODE(wsf.byte1)
+           || 0x1==OPCODE(wsf.byte1)
+           || 0x2==OPCODE(wsf.byte1))
+    conn->on_data_frame(conn, &wsf);
+  else
+    /* unknown opcode */
+    start_closing_handshake(conn, &wsf);
 
-  printf("***%s\n", buf_ref(conn->buf_in));
-
-  buf_clear(conn->buf_in);
+  assert(buf_pos(conn->buf_in)==0);    
 
   return 1;
 }
@@ -246,8 +263,7 @@ static void
 decode(buf_t *buf, wsframe_t *wsf)
 {
   int pos=buf_pos(buf);
-  int j=0;
-  int i;
+  int j, i;
   for (i=0; i<wsf->payload_len; i++)
     {
       char b=buf_get(buf);
@@ -262,9 +278,11 @@ decode(buf_t *buf, wsframe_t *wsf)
       else
         mask=(unsigned char)((wsf->masking_key&0xff000000)>>24);
 
+      b^=mask;
+
       /* decode in-place */
       buf_rwnd(buf, 1);
-      buf_put(buf, (b^mask));
+      buf_put(buf, b);
     }
 
   buf_set_pos(buf, pos);
@@ -300,4 +318,40 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
     }
 
   return 0;
+}
+
+void
+on_close(buf_t *b, wsframe_t *wsf)
+{
+
+}
+
+void
+on_ping(buf_t *b, wsframe_t *wsf)
+{
+
+}
+
+void
+on_pong(buf_t *b, wsframe_t *wsf)
+{
+
+}
+
+int
+start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf)
+{
+  return -1;
+}
+
+int
+is_valid_proto(http_req_t *hr)
+{
+  trim(&(hr->sec_ws_proto));
+  /* TODO lookup supported protocols */
+  if (0!=strcmp(hr->sec_ws_proto.start,
+                "chat1"))
+    return 0;
+
+  return 1;
 }

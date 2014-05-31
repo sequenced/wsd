@@ -8,6 +8,7 @@
 
 wsd_config_t *wsd_cfg;
 
+static const char *PROTO="chat1";
 static const char *VER="13";
 static const char *KEY="dGhlIHNhbXBsZSBub25jZQ==";
 static const char *EXPECTED_ACCEPT_VAL="s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
@@ -29,6 +30,8 @@ main(int argc, char **argv)
   hr.sec_ws_ver.len=strlen(VER);
   hr.sec_ws_key.start=KEY;
   hr.sec_ws_key.len=strlen(KEY);
+  hr.sec_ws_proto.start=PROTO;
+  hr.sec_ws_proto.len=strlen(PROTO);
 
   int rv=ws_on_handshake(&wsc, &hr);
 

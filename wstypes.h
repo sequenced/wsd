@@ -32,6 +32,14 @@ typedef struct
   char swap;
 } buf_t;
 
+typedef struct
+{
+  char byte1;
+  char byte2;
+  unsigned long payload_len;
+  unsigned int masking_key;
+} wsframe_t;
+
 struct wschild_conn
 {
   struct pollfd *pfd;
@@ -39,6 +47,7 @@ struct wschild_conn
   buf_t *buf_out;
   int (*on_read)(struct wschild_conn *conn);
   int (*on_write)(struct wschild_conn *conn);
+  int (*on_data_frame)(struct wschild_conn *conn, wsframe_t *wsf);
   int close_on_write;
 };
 typedef struct wschild_conn wschild_conn_t;
@@ -79,13 +88,5 @@ int buf_len(buf_t *b);
 int buf_pos(buf_t *b);
 void buf_set_pos(buf_t *b, int pos);
 char* buf_flip(buf_t *b);
-
-typedef struct
-{
-  char byte1;
-  char byte2;
-  unsigned long payload_len;
-  unsigned int masking_key;
-} wsframe_t;
 
 #endif /* #ifndef __WSTYPES_H__ */
