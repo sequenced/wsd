@@ -59,8 +59,9 @@ static int
 is_valid_ver(http_req_t *hr)
 {
   trim(&(hr->sec_ws_ver));
-  if (0!=strcmp(hr->sec_ws_ver.start,
-                FLD_SEC_WS_VER_VAL))
+  if (0!=strncmp(hr->sec_ws_ver.start,
+                 FLD_SEC_WS_VER_VAL,
+                 hr->sec_ws_ver.len))
     return 0;
 
   return 1;
@@ -349,8 +350,9 @@ is_valid_proto(http_req_t *hr)
 {
   trim(&(hr->sec_ws_proto));
   /* TODO lookup supported protocols */
-  if (0!=strcmp(hr->sec_ws_proto.start,
-                "chat1"))
+  if (0!=strncmp(hr->sec_ws_proto.start,
+                 "chat1",
+                 hr->sec_ws_proto.len))
     return 0;
 
   return 1;
