@@ -17,11 +17,12 @@
 
 #define SCRATCH_SIZE 64
 
-#define WS_MASKING_KEY_LEN 4
-#define WS_FRAME_LEN       6
-#define WS_FRAME_LEN16     8
-#define WS_FRAME_LEN64     16
-#define WS_ACCEPT_KEY_LEN  28
+#define WS_FRAME_STATUS_LEN 2
+#define WS_MASKING_KEY_LEN  4
+#define WS_FRAME_LEN        6
+#define WS_FRAME_LEN16      8
+#define WS_FRAME_LEN64      16
+#define WS_ACCEPT_KEY_LEN   28
 #define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 #define WS_VER "Sec-WebSocket-Version: "
 #define WS_PROTO "Sec-WebSocket-Protocol: "
@@ -50,10 +51,11 @@ static int prepare_handshake(buf_t *b, http_req_t *hr);
 static int generate_accept_val(buf_t *b, http_req_t *hr);
 static int fill_in_wsframe_details(buf_t *b, wsframe_t *wsf);
 static void decode(buf_t *b, wsframe_t *wsf);
-static void on_close(buf_t *b, wsframe_t *wsf);
-static void on_ping(buf_t *b, wsframe_t *wsf);
-static void on_pong(buf_t *b, wsframe_t *wsf);
+static int on_close(buf_t *b, wsframe_t *wsf);
+static int on_ping(buf_t *b, wsframe_t *wsf);
+static int on_pong(buf_t *b, wsframe_t *wsf);
 static int start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf);
+static int dispatch(wschild_conn_t *conn, wsframe_t *wsf);
 
 static int
 is_valid_ver(http_req_t *hr)
@@ -234,24 +236,31 @@ ws_on_read(wschild_conn_t *conn)
     return 1;
 
   decode(conn->buf_in, &wsf);
+  return dispatch(conn, &wsf);
+}
 
-  if (0x8==OPCODE(wsf.byte1))
-    on_close(conn->buf_in, &wsf);
-  else if (0x9==OPCODE(wsf.byte1))
-    on_ping(conn->buf_in, &wsf);
-  else if (0xa==OPCODE(wsf.byte1))
-    on_pong(conn->buf_in, &wsf);
-  else if (0x0==OPCODE(wsf.byte1)
-           || 0x1==OPCODE(wsf.byte1)
-           || 0x2==OPCODE(wsf.byte1))
-    conn->on_data_frame(conn, &wsf);
+int
+dispatch(wschild_conn_t *conn, wsframe_t *wsf)
+{
+  int rv;
+
+  if (0x8==OPCODE(wsf->byte1))
+    rv=on_close(conn->buf_in, wsf);
+  else if (0x9==OPCODE(wsf->byte1))
+    rv=on_ping(conn->buf_in, wsf);
+  else if (0xa==OPCODE(wsf->byte1))
+    rv=on_pong(conn->buf_in, wsf);
+  else if (0x0==OPCODE(wsf->byte1)
+           || 0x1==OPCODE(wsf->byte1)
+           || 0x2==OPCODE(wsf->byte1))
+    rv=conn->on_data_frame(conn, wsf);
   else
     /* unknown opcode */
-    start_closing_handshake(conn, &wsf);
+    rv=start_closing_handshake(conn, wsf);
 
-  assert(buf_pos(conn->buf_in)==0);    
+  assert(buf_pos(conn->buf_in)==0);
 
-  return 1;
+  return rv;
 }
 
 int
@@ -321,22 +330,34 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
   return 0;
 }
 
-void
+int
 on_close(buf_t *b, wsframe_t *wsf)
 {
+  if (buf_len(b)<WS_FRAME_STATUS_LEN)
+    /* not enough data: retry */
+    return 1;
 
+  unsigned short status=ntohs(*(unsigned short*)buf_ref(b));
+  buf_fwd(b, 2); /* unsigned short = two bytes */
+
+  if (wsd_cfg->verbose)
+    printf("close frame: %ud\n", status);
+
+  /* TODO send close frame */
+
+  return -1;
 }
 
-void
+int
 on_ping(buf_t *b, wsframe_t *wsf)
 {
-
+  return -1;
 }
 
-void
+int
 on_pong(buf_t *b, wsframe_t *wsf)
 {
-
+  return -1;
 }
 
 int
