@@ -3,7 +3,9 @@
 
 #include <sys/types.h>
 
-#define UNASSIGNED (-1)
+#define HASH32_TABLE_SIZE  256
+#define HASH_ENTRY_BUCKETS 8
+#define UNASSIGNED         (-1)
 #define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
 
 typedef struct
@@ -88,5 +90,26 @@ int buf_len(buf_t *b);
 int buf_pos(buf_t *b);
 void buf_set_pos(buf_t *b, int pos);
 char* buf_flip(buf_t *b);
+
+typedef struct
+{
+  void *data;
+  int key;
+} bucket32_t;
+
+typedef struct
+{
+  bucket32_t buckets[HASH_ENTRY_BUCKETS];
+} hash_table_entry32_t;
+
+typedef struct
+{
+  unsigned int (*hash)(int val);
+  hash_table_entry32_t entries[HASH32_TABLE_SIZE];
+} hash32_table_t;
+
+void *hash32_table_lookup(hash32_table_t *t, int key);
+int hash32_table_insert(hash32_table_t *t, int key, void *data);
+unsigned int hash32_table_hash(int val);
 
 #endif /* #ifndef __WSTYPES_H__ */
