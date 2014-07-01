@@ -1,14 +1,13 @@
 #ifndef __LIST_H__
 #define __LIST_H__
 
-/* A list implementation; copied from linux/list.h and slightly adapted */
+#include <stddef.h> /* for offsetof */
 
-/* Using address zero here allows offset calculation. Don't you love C? */
-#define offsetof2(type, member) ((size_t) &((type *)0)->member)
+/* A list implementation; copied from linux/list.h and slightly adapted */
 
 #define container_of(ptr, type, member) ({                              \
       const typeof(((type *)0)->member)*__mptr = (ptr);                 \
-      (type *)((char *)__mptr - offsetof2(type, member)); })
+      (type *)((char *)__mptr - offsetof(type, member)); })
 
 struct list_head {
   struct list_head *next, *prev;
