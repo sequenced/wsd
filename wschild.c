@@ -145,7 +145,7 @@ pfd_find_free_slot()
 }
 
 #define pfd_is_in_use(slot)                     \
-  (pfd[i].fd>=0?1:0)
+  (pfd[slot].fd>=0?1:0)
 
 int
 wschild_main(const wsd_config_t *cfg)
