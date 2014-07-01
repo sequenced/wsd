@@ -4,13 +4,13 @@
 #include <assert.h>
 #include <endian.h>
 #include <sys/types.h>
+#include <arpa/inet.h>
 #include <openssl/sha.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
 #include "http.h"
 #include "ws.h"
-#include "chat1.h"
 
 #define HTTP_400 "HTTP/1.1 400 Bad Request\r\nSec-WebSocket-Version: 13\r\nContent-Length: 0\r\n\r\n"
 #define HTTP_101 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
@@ -46,7 +46,7 @@ extern const wsd_config_t *wsd_cfg;
 static const char *FLD_SEC_WS_VER_VAL="13";
 
 static int is_valid_ver(http_req_t *hr);
-static int is_valid_proto(http_req_t *hr);
+static int is_valid_proto(http_req_t *hr, location_config_t *loc);
 static int prepare_handshake(buf_t *b, http_req_t *hr);
 static int generate_accept_val(buf_t *b, http_req_t *hr);
 static int fill_in_wsframe_details(buf_t *b, wsframe_t *wsf);
@@ -56,6 +56,7 @@ static int on_ping(buf_t *b, wsframe_t *wsf);
 static int on_pong(buf_t *b, wsframe_t *wsf);
 static int start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf);
 static int dispatch(wschild_conn_t *conn, wsframe_t *wsf);
+static location_config_t *lookup_location(http_req_t *hr);
 
 static int
 is_valid_ver(http_req_t *hr)
@@ -157,20 +158,15 @@ generate_accept_val(buf_t *b, http_req_t *hr)
 int
 ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
 {
-  if (!is_valid_ver(hr)
-      || !is_valid_proto(hr))
-    {
-      if (0>http_prepare_response(conn->buf_out, HTTP_400))
-        return -1;
+  if (!is_valid_ver(hr))
+    goto bad;
 
-      buf_clear(conn->buf_in);
-      buf_flip(conn->buf_out);
-      conn->pfd->events|=POLLOUT;
+  location_config_t *loc;
+  if (!(loc=lookup_location(hr)))
+    goto bad;
 
-      return 1;
-    }
-
-  /* TODO check requested resource */
+  if (!is_valid_proto(hr, loc))
+    goto bad;
 
   /* handshake syntactically and semantically correct */
 
@@ -185,9 +181,16 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
   /* switch into websocket mode */
   conn->on_read=ws_on_read;
   conn->on_write=ws_on_write;
-  /* TODO lookup protocol */
-  conn->on_data_frame=chat1_on_frame;
+  /* hook up protocol handler */
+  conn->on_data_frame=loc->on_frame;
 
+  goto ok;
+
+ bad:
+  if (0>http_prepare_response(conn->buf_out, HTTP_400))
+    return -1;
+
+ ok:
   buf_clear(conn->buf_in);
   buf_flip(conn->buf_out);
   conn->pfd->events|=POLLOUT;
@@ -367,14 +370,28 @@ start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf)
 }
 
 int
-is_valid_proto(http_req_t *hr)
+is_valid_proto(http_req_t *hr, location_config_t *loc)
 {
   trim(&(hr->sec_ws_proto));
-  /* TODO lookup supported protocols */
   if (0!=strncmp(hr->sec_ws_proto.start,
-                 "chat1",
+                 loc->protocol,
                  hr->sec_ws_proto.len))
     return 0;
 
   return 1;
+}
+
+static location_config_t *
+lookup_location(http_req_t *hr)
+{
+  location_config_t *rv=0, *cursor;
+  list_for_each_entry(cursor, &wsd_cfg->location_list, list_head)
+    {
+      if (0==strncasecmp(hr->req_uri.start,
+                         cursor->url,
+                         hr->req_uri.len))
+        rv=cursor;
+    }
+
+  return rv;
 }

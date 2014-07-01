@@ -13,11 +13,14 @@
 #include <pwd.h>
 #include "wstypes.h"
 #include "wschild.h"
+#include "list.h"
+#include "chat1.h" /* TODO make configurable */
 
 static const char *ident="wsd";
 static int drop_priv(uid_t new_uid);
 static void sighup(int);
 static int open_socket(int p);
+static int fill_in_config_from_file(wsd_config_t *cfg);
 
 int
 main(int argc, char **argv)
@@ -77,11 +80,18 @@ main(int argc, char **argv)
   wsd_config_t cfg;
   memset(&cfg, 0x0, sizeof(wsd_config_t));
   cfg.uid=pwent->pw_uid;
-  cfg.name=malloc(strlen(pwent->pw_name)+1);
-  strcpy(cfg.name, pwent->pw_name);
+  cfg.username=malloc(strlen(pwent->pw_name)+1);
+  strcpy(cfg.username, pwent->pw_name);
   cfg.port=port_arg;
   cfg.verbose=verbose_arg;
   cfg.no_fork=no_fork_arg;
+
+  if (0>fill_in_config_from_file(&cfg))
+    {
+      /* TODO */
+      fprintf(stderr, "config file\n");
+      exit(1);
+    }
 
   openlog(ident, LOG_PID, LOG_USER);
   syslog(LOG_INFO, "starting");
@@ -181,4 +191,23 @@ open_socket(int p)
     return -1;
 
   return s;
+}
+
+static int
+fill_in_config_from_file(wsd_config_t *cfg)
+{
+  /* TODO actually read file */
+  init_list_head(&cfg->location_list);
+
+  location_config_t *loc;
+  if (!(loc=malloc(sizeof(location_config_t))))
+    return -1;
+
+  loc->url="/chatterbox";
+  loc->protocol="chat1";
+  loc->on_frame=chat1_on_frame;
+
+  list_add_tail(&loc->list_head, &cfg->location_list);
+
+  return 0;
 }

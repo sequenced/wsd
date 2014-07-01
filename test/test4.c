@@ -46,7 +46,10 @@ main(int argc, char **argv)
 
   test4_string_t *e;
   list_for_each_entry(e, &t.string_list, list_head)
-    printf("%s\n", e->string);
+    if (0!=strcmp("one", e->string)
+        && 0!=strcmp("two", e->string)
+        && 0!=strcmp("three", e->string))
+      return 1;
 
   return 0;
 }

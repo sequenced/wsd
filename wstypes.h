@@ -2,22 +2,12 @@
 #define __WSTYPES_H__
 
 #include <sys/types.h>
+#include "list.h"
 
 #define HASH32_TABLE_SIZE  256
 #define HASH_ENTRY_BUCKETS 8
 #define UNASSIGNED         (-1)
 #define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
-
-typedef struct
-{
-  uid_t uid;
-  char *name;
-  char *hostname;
-  int sock;
-  int port;
-  int verbose;
-  int no_fork;
-} wsd_config_t;
 
 typedef struct
 {
@@ -53,6 +43,27 @@ struct wschild_conn
   int close_on_write;
 };
 typedef struct wschild_conn wschild_conn_t;
+
+typedef struct
+{
+  struct list_head list_head;
+  char *url;
+  char *protocol;
+  int (*on_frame)(wschild_conn_t *conn, wsframe_t *wsf);
+} location_config_t;
+
+typedef struct
+{
+  uid_t uid;
+  char *username;
+  char *hostname;
+  int sock;
+  int port;
+  int verbose;
+  int no_fork;
+  struct list_head list_head;
+  struct list_head location_list;
+} wsd_config_t;
 
 /* as per RFC2616 section 5.1 */
 typedef struct
