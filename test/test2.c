@@ -54,5 +54,46 @@ main(int argc, char **argv)
   rv=tok(NULL, ',');
   assert(-1==rv->len);
 
+  /* test buffer routines put, get and compact */
+  const int len=128;
+  buf_t *b=buf_alloc(len);
+  
+  assert(len==buf_len(b));
+
+  buf_put(b, 'a');
+  buf_put(b, 'b');
+  buf_put(b, 'c');
+  buf_put(b, 'd');
+  buf_put(b, 'e');
+
+  buf_flip(b);
+
+  assert('a'==buf_get(b));
+  assert('b'==buf_get(b));
+  assert('c'==buf_get(b));
+
+  buf_compact(b);
+
+  assert(2==buf_pos(b));
+  
+  buf_put(b, 'f');
+  buf_put(b, 'g');
+
+  buf_flip(b);
+
+  assert('d'==buf_get(b));
+  assert('e'==buf_get(b));
+  assert('f'==buf_get(b));
+  assert('g'==buf_get(b));
+
+  buf_rwnd(b, 1);
+
+  assert('g'==buf_get(b));
+  assert(0==buf_len(b));
+
+  buf_compact(b);
+
+  assert(len==buf_len(b));
+
   return 0;
 }

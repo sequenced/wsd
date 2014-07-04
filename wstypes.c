@@ -167,7 +167,7 @@ tok(string_t *str, const char del)
   return &rv;
 }
 
-short
+inline short
 buf_get_short(buf_t *b)
 {
   short s=*((short*)(b->p+b->pos));
@@ -176,7 +176,7 @@ buf_get_short(buf_t *b)
 
 }
 
-long
+inline long
 buf_get_long(buf_t *b)
 {
   long l=*((long*)(b->p+b->pos));
@@ -184,7 +184,7 @@ buf_get_long(buf_t *b)
   return l;
 }
 
-int
+inline int
 buf_get_int(buf_t *b)
 {
   int k=*((int*)(b->p+b->pos));
@@ -192,10 +192,21 @@ buf_get_int(buf_t *b)
   return k;
 }
 
-void
+inline void
 buf_set_pos(buf_t *b, int pos)
 {
   b->pos=pos;
+}
+
+inline void
+buf_compact(buf_t *b)
+{
+  int i=0;
+  while (b->pos<b->limit)
+    *(b->p+i++)=*(b->p+b->pos++);
+
+  b->pos=i;
+  b->limit=b->capacity;
 }
 
 void
