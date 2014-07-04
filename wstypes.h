@@ -102,6 +102,7 @@ int buf_pos(buf_t *b);
 void buf_set_pos(buf_t *b, int pos);
 char* buf_flip(buf_t *b);
 void buf_compact(buf_t *b);
+void buf_slice(buf_t *a, buf_t *b, int len);
 
 typedef struct
 {

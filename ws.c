@@ -223,8 +223,10 @@ ws_on_read(wschild_conn_t *conn)
     }
 
   if (0>fill_in_wsframe_details(conn->buf_in, &wsf))
-    /* TODO retry */
-    return 1;
+    {
+      buf_flip(conn->buf_in);
+      return 1;
+    }
 
   if (wsd_cfg->verbose)
     printf("ws frame: 0x%hhx, 0x%hhx, 0x%x (opcode)\n",
@@ -235,8 +237,10 @@ ws_on_read(wschild_conn_t *conn)
   /* TODO check that payload64 has left-most bit off */
 
   if (buf_len(conn->buf_in)<wsf.payload_len)
-    /* TODO retry */
-    return 1;
+    {
+      buf_flip(conn->buf_in);
+      return 1;
+    }
 
   decode(conn->buf_in, &wsf);
   return dispatch(conn, &wsf);
@@ -246,13 +250,15 @@ int
 dispatch(wschild_conn_t *conn, wsframe_t *wsf)
 {
   int rv;
+  buf_t slice;
+  buf_slice(&slice, conn->buf_in, wsf->payload_len);
 
   if (0x8==OPCODE(wsf->byte1))
-    rv=on_close(conn->buf_in, wsf);
+    rv=on_close(&slice, wsf);
   else if (0x9==OPCODE(wsf->byte1))
-    rv=on_ping(conn->buf_in, wsf);
+    rv=on_ping(&slice, wsf);
   else if (0xa==OPCODE(wsf->byte1))
-    rv=on_pong(conn->buf_in, wsf);
+    rv=on_pong(&slice, wsf);
   else if (0x0==OPCODE(wsf->byte1)
            || 0x1==OPCODE(wsf->byte1)
            || 0x2==OPCODE(wsf->byte1))
@@ -261,7 +267,9 @@ dispatch(wschild_conn_t *conn, wsframe_t *wsf)
     /* unknown opcode */
     rv=start_closing_handshake(conn, wsf);
 
-  assert(buf_pos(conn->buf_in)==0);
+  /* clear buffer by consuming this frame's payload */
+  buf_fwd(conn->buf_in, wsf->payload_len);
+  buf_compact(conn->buf_in);
 
   return rv;
 }
@@ -336,15 +344,16 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
 int
 on_close(buf_t *b, wsframe_t *wsf)
 {
-  if (buf_len(b)<WS_FRAME_STATUS_LEN)
-    /* not enough data: retry */
-    return 1;
+  if (2<=buf_len(b))
+    {
+      unsigned short status=ntohs(*(unsigned short*)buf_ref(b));
+      buf_fwd(b, 2); /* unsigned short = two bytes */
 
-  unsigned short status=ntohs(*(unsigned short*)buf_ref(b));
-  buf_fwd(b, 2); /* unsigned short = two bytes */
-
-  if (wsd_cfg->verbose)
-    printf("close frame: %ud\n", status);
+      if (wsd_cfg->verbose)
+        printf("close frame: %ud\n", status);
+    }
+  else if (wsd_cfg->verbose)
+    printf("close frame\n");
 
   /* TODO send close frame */
 
@@ -366,6 +375,9 @@ on_pong(buf_t *b, wsframe_t *wsf)
 int
 start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf)
 {
+  if (wsd_cfg->verbose)
+    printf("unknown opcode: 0x%x\n", OPCODE(wsf->byte1));
+
   return -1;
 }
 

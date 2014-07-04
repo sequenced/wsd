@@ -209,6 +209,17 @@ buf_compact(buf_t *b)
   b->limit=b->capacity;
 }
 
+inline void
+buf_slice(buf_t *a, buf_t *b, int len)
+{
+  /* a is going to be a subsequence of b */
+  a->p=b->p;
+  a->pos=b->pos;
+  a->limit=len;
+  a->capacity=b->capacity;
+  a->swap='\0';
+}
+
 void
 *hash32_table_lookup(hash32_table_t *t, int key)
 {

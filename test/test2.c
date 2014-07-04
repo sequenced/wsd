@@ -95,5 +95,26 @@ main(int argc, char **argv)
 
   assert(len==buf_len(b));
 
+  buf_put(b, '1');
+  buf_put(b, '2');
+
+  buf_flip(b);
+
+  assert('1'==buf_get(b));
+
+  buf_flip(b);
+  buf_put(b, '3');
+  buf_put(b, '4');
+  buf_flip(b);
+
+  assert('1'==buf_get(b));
+  assert('2'==buf_get(b));
+  assert('3'==buf_get(b));
+  assert('4'==buf_get(b));
+
+  buf_compact(b);
+
+  assert(len==buf_len(b));
+
   return 0;
 }
