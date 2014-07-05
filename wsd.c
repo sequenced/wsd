@@ -205,7 +205,7 @@ fill_in_config_from_file(wsd_config_t *cfg)
 
   loc->url="/chatterbox";
   loc->protocol="chat1";
-  loc->on_frame=chat1_on_frame;
+  loc->on_data_frame=chat1_on_frame;
 
   list_add_tail(&loc->list_head, &cfg->location_list);
 

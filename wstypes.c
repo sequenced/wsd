@@ -167,13 +167,20 @@ tok(string_t *str, const char del)
   return &rv;
 }
 
-inline short
+inline unsigned short
 buf_get_short(buf_t *b)
 {
-  short s=*((short*)(b->p+b->pos));
+  unsigned short s=*((unsigned short*)(b->p+b->pos));
   b->pos+=2;
   return s;
 
+}
+
+inline void
+buf_put_short(buf_t *b, unsigned short val)
+{
+  *(unsigned short*)(b->p+b->pos)=val;
+  b->pos+=2;
 }
 
 inline long
@@ -215,9 +222,16 @@ buf_slice(buf_t *a, buf_t *b, int len)
   /* a is going to be a subsequence of b */
   a->p=b->p;
   a->pos=b->pos;
-  a->limit=len;
+  a->limit=b->pos+len;
   a->capacity=b->capacity;
   a->swap='\0';
+}
+
+inline void
+buf_put_string(buf_t *b, char *s)
+{
+  while ('\0'!=*s++)
+    buf_put(b, *s);
 }
 
 void

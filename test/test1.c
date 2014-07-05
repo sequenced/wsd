@@ -16,7 +16,7 @@ static const char *EXPECTED_ACCEPT_VAL="s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
 static const int EXPECTED_RET_VAL=1;
 
 static int
-on_frame(wschild_conn_t *ignored, wsframe_t *this_too)
+on_frame(wschild_conn_t *ignored, wsframe_t *this_too, buf_t *b)
 {
   return 0xdeadbeef;
 }
@@ -34,7 +34,7 @@ main(int argc, char **argv)
     return -1;
   loc->url=URI;
   loc->protocol="chat1";
-  loc->on_frame=on_frame;
+  loc->on_data_frame=on_frame;
   list_add_tail(&loc->list_head, &wsd_cfg->location_list);
 
   /* setup record of a connection */
@@ -61,9 +61,10 @@ main(int argc, char **argv)
   int rv=ws_on_handshake(&wsc, &hr);
 
   assert(rv==EXPECTED_RET_VAL);
+  buf_flip(wsc.buf_out);
   assert(NULL!=strstr(buf_ref(wsc.buf_out), EXPECTED_ACCEPT_VAL));
   assert(wsc.pfd->events&POLLOUT);
-  assert(0xdeadbeef==wsc.on_data_frame(NULL, NULL));
+  assert(0xdeadbeef==wsc.on_data_frame(NULL, NULL, NULL));
 
   free(wsc.pfd);
   free(loc);

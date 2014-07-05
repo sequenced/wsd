@@ -39,7 +39,7 @@ struct wschild_conn
   buf_t *buf_out;
   int (*on_read)(struct wschild_conn *conn);
   int (*on_write)(struct wschild_conn *conn);
-  int (*on_data_frame)(struct wschild_conn *conn, wsframe_t *wsf);
+  int (*on_data_frame)(struct wschild_conn *conn, wsframe_t *wsf, buf_t *b);
   int close_on_write;
 };
 typedef struct wschild_conn wschild_conn_t;
@@ -49,7 +49,7 @@ typedef struct
   struct list_head list_head;
   char *url;
   char *protocol;
-  int (*on_frame)(wschild_conn_t *conn, wsframe_t *wsf);
+  int (*on_data_frame)(wschild_conn_t *conn, wsframe_t *wsf, buf_t *b);
 } location_config_t;
 
 typedef struct
@@ -93,7 +93,9 @@ void buf_rwnd(buf_t *b, int len);
 void buf_fwd(buf_t *b, int len);
 void buf_put(buf_t *b, char c);
 char buf_get(buf_t *b);
-short buf_get_short(buf_t *b);
+unsigned short buf_get_short(buf_t *b);
+void buf_put_short(buf_t *b, unsigned short val);
+void buf_put_string(buf_t *b, char *s);
 int buf_get_int(buf_t *b);
 long buf_get_long(buf_t *b);
 char* buf_ref(buf_t *b);

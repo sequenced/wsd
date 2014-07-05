@@ -12,27 +12,30 @@
 #include "http.h"
 #include "ws.h"
 
-#define HTTP_400 "HTTP/1.1 400 Bad Request\r\nSec-WebSocket-Version: 13\r\nContent-Length: 0\r\n\r\n"
-#define HTTP_101 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
+#define HTTP_400              "HTTP/1.1 400 Bad Request\r\nSec-WebSocket-Version: 13\r\nContent-Length: 0\r\n\r\n"
+#define HTTP_101              "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
+#define SCRATCH_SIZE          64
+#define WS_FRAME_STATUS_LEN   2
+#define WS_MASKING_KEY_LEN    4
+#define WS_MASKED_FRAME_LEN   6
+#define WS_UNMASKED_FRAME_LEN 2
+#define WS_MASKED_FRAME_LEN16 8
+#define WS_MASKED_FRAME_LEN64 16
+#define WS_ACCEPT_KEY_LEN     28
+#define WS_GUID               "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+#define WS_VER                "Sec-WebSocket-Version: "
+#define WS_PROTO              "Sec-WebSocket-Protocol: "
 
-#define SCRATCH_SIZE 64
-
-#define WS_FRAME_STATUS_LEN 2
-#define WS_MASKING_KEY_LEN  4
-#define WS_FRAME_LEN        6
-#define WS_FRAME_LEN16      8
-#define WS_FRAME_LEN64      16
-#define WS_ACCEPT_KEY_LEN   28
-#define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-#define WS_VER "Sec-WebSocket-Version: "
-#define WS_PROTO "Sec-WebSocket-Protocol: "
 #define FIN_BIT(byte) (0x80&byte)
+#define SET_FIN_BIT(byte) (byte|=0x80)
 #define RSV1_BIT(byte) (0x40&byte)
 #define RSV2_BIT(byte) (0x20&byte)
 #define RSV3_BIT(byte) (0x10&byte)
 #define OPCODE(byte) (0xf&byte)
+#define SET_OPCODE(byte, val) (byte|=(0xf&val))
 #define MASK_BIT(byte) (0x80&byte)
 #define PAYLOAD_LEN(byte) (unsigned long)(0x7f&byte)
+#define SET_PAYLOAD_LEN(byte, val) (byte|=(0x7f&val))
 /* #define PAYLOAD_LEN16(frame)                                            \ */
 /*   ((unsigned long int)be16toh(*(unsigned short*)(frame->byte3))) */
 /* #define PAYLOAD_LEN64(frame)                                    \ */
@@ -51,7 +54,7 @@ static int prepare_handshake(buf_t *b, http_req_t *hr);
 static int generate_accept_val(buf_t *b, http_req_t *hr);
 static int fill_in_wsframe_details(buf_t *b, wsframe_t *wsf);
 static void decode(buf_t *b, wsframe_t *wsf);
-static int on_close(buf_t *b, wsframe_t *wsf);
+static int on_close(wschild_conn_t *conn, buf_t *b);
 static int on_ping(buf_t *b, wsframe_t *wsf);
 static int on_pong(buf_t *b, wsframe_t *wsf);
 static int start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf);
@@ -182,7 +185,7 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
   conn->on_read=ws_on_read;
   conn->on_write=ws_on_write;
   /* hook up protocol handler */
-  conn->on_data_frame=loc->on_frame;
+  conn->on_data_frame=loc->on_data_frame;
 
   goto ok;
 
@@ -192,7 +195,6 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
 
  ok:
   buf_clear(conn->buf_in);
-  buf_flip(conn->buf_out);
   conn->pfd->events|=POLLOUT;
 
   return 1;
@@ -203,9 +205,9 @@ ws_on_read(wschild_conn_t *conn)
 {
   buf_flip(conn->buf_in);
 
-  if (buf_len(conn->buf_in)<WS_FRAME_LEN)
+  if (buf_len(conn->buf_in)<WS_MASKED_FRAME_LEN)
     {
-      /* need at least WS_FRAME_LEN bytes; see RFC6455 section 5.2 */
+      /* need at least WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2 */
       buf_flip(conn->buf_in);
       return 1;
     }
@@ -256,7 +258,7 @@ dispatch(wschild_conn_t *conn, wsframe_t *wsf)
   buf_slice(&slice, conn->buf_in, wsf->payload_len);
 
   if (0x8==OPCODE(wsf->byte1))
-    rv=on_close(&slice, wsf);
+    rv=on_close(conn, &slice);
   else if (0x9==OPCODE(wsf->byte1))
     rv=on_ping(&slice, wsf);
   else if (0xa==OPCODE(wsf->byte1))
@@ -264,7 +266,7 @@ dispatch(wschild_conn_t *conn, wsframe_t *wsf)
   else if (0x0==OPCODE(wsf->byte1)
            || 0x1==OPCODE(wsf->byte1)
            || 0x2==OPCODE(wsf->byte1))
-    rv=conn->on_data_frame(conn, wsf);
+    rv=conn->on_data_frame(conn, wsf, &slice);
   else
     /* unknown opcode */
     rv=start_closing_handshake(conn, wsf);
@@ -344,12 +346,13 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
 }
 
 int
-on_close(buf_t *b, wsframe_t *wsf)
+on_close(wschild_conn_t *conn, buf_t *b)
 {
+  unsigned short status=0;
   if (WS_FRAME_STATUS_LEN<=buf_len(b))
     {
-      unsigned short status=ntohs(*(unsigned short*)buf_ref(b));
-      buf_fwd(b, 2); /* unsigned short = two bytes */
+      status=ntohs(buf_get_short(b));
+      buf_fwd(b, 2); /* unsigned short = 2 bytes; see RFC6455 section 5.5.1 */
 
       if (wsd_cfg->verbose)
         printf("close frame: %ud\n", status);
@@ -357,9 +360,27 @@ on_close(buf_t *b, wsframe_t *wsf)
   else if (wsd_cfg->verbose)
     printf("close frame\n");
 
-  /* TODO send close frame */
+  if (buf_len(conn->buf_out)<WS_UNMASKED_FRAME_LEN)
+    return -1;
 
-  return -1;
+  char byte1=0, byte2=0;
+  SET_FIN_BIT(byte1);
+  SET_OPCODE(byte1, 0x8);
+
+  if (0<status)
+    {
+      /* echo back status code; see RFC6455 section 5.5.1 */
+      SET_PAYLOAD_LEN(byte2, 2); /* 2 = status code typed unsigned short */
+      buf_put(conn->buf_out, byte1);
+      buf_put(conn->buf_out, byte2);
+      buf_put_short(conn->buf_out, htons(status));
+    }
+
+  buf_clear(conn->buf_in);
+  conn->pfd->events|=POLLOUT;
+  conn->close_on_write=1;
+
+  return 1;
 }
 
 int

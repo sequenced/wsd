@@ -269,7 +269,6 @@ http_on_read(wschild_conn_t *conn)
 
  error:
   buf_clear(conn->buf_in);
-  buf_flip(conn->buf_out);
   conn->pfd->events|=POLLOUT;
   conn->close_on_write=1;
 

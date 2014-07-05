@@ -216,8 +216,10 @@ on_accept(int fd)
 static int
 on_write(wschild_conn_t *conn)
 {
+  buf_flip(conn->buf_out);
+
   if (wsd_cfg->verbose)
-    printf("%s", buf_ref(conn->buf_out));
+    printf("sending %d byte(s)\n", buf_len(conn->buf_out));
 
   int len;
   len=write(conn->pfd->fd,
@@ -227,7 +229,10 @@ on_write(wschild_conn_t *conn)
   if (0>len)
     {
       if (errno==EAGAIN || errno==EWOULDBLOCK)
-        return 1;
+        {
+          buf_flip(conn->buf_out);
+          return 1;
+        }
 
       return -1;
     }
@@ -236,13 +241,19 @@ on_write(wschild_conn_t *conn)
     return 0;
 
   buf_fwd(conn->buf_out, len);
-  if (0==buf_len(conn->buf_out))
+  buf_compact(conn->buf_out);
+  if (0==buf_pos(conn->buf_out))
     {
-      buf_clear(conn->buf_out);
+      /* buffer empty, nothing else to write */
       conn->pfd->events&=(~POLLOUT);
 
       if (conn->close_on_write)
-        return 0;
+        {
+          if (wsd_cfg->verbose)
+            printf("closing connection on successful write\n");
+
+          return 0;
+        }
     }
 
   return 1;

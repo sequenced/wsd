@@ -116,5 +116,36 @@ main(int argc, char **argv)
 
   assert(len==buf_len(b));
 
+  buf_clear(b);
+
+  assert(len==buf_len(b));
+  assert(0==buf_pos(b));
+  buf_flip(b);
+  assert(0==buf_len(b));
+  assert(0==buf_pos(b));
+  buf_flip(b);
+  assert(len==buf_len(b));
+  assert(0==buf_pos(b));
+
+  buf_clear(b);
+  buf_put(b, 'z');
+  buf_put(b, 'y');
+  buf_flip(b);
+  assert(2==buf_len(b));
+  buf_fwd(b, 1);
+  assert(1==buf_len(b));
+  assert(1==buf_pos(b));
+  buf_compact(b);
+  assert(1==buf_pos(b));
+  assert(len-1==buf_len(b));
+  buf_flip(b);
+  assert(0==buf_pos(b));
+  assert(1==buf_len(b));
+  assert('y'==buf_get(b));
+  assert(0==buf_len(b));
+  buf_compact(b);
+  assert(len==buf_len(b));
+  assert(0==buf_pos(b));
+
   return 0;
 }
