@@ -230,8 +230,8 @@ buf_slice(buf_t *a, buf_t *b, int len)
 inline void
 buf_put_string(buf_t *b, char *s)
 {
-  while ('\0'!=*s++)
-    buf_put(b, *s);
+  while ('\0'!=*s)
+    buf_put(b, *s++);
 }
 
 void
