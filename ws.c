@@ -204,9 +204,11 @@ ws_on_read(wschild_conn_t *conn)
   buf_flip(conn->buf_in);
 
   if (buf_len(conn->buf_in)<WS_FRAME_LEN)
-    /* need at least WS_FRAME_LEN bytes; see RFC6455 section 5.2 */
-    /* TODO retry */
-    return 1;
+    {
+      /* need at least WS_FRAME_LEN bytes; see RFC6455 section 5.2 */
+      buf_flip(conn->buf_in);
+      return 1;
+    }
 
   wsframe_t wsf;
   memset(&wsf, 0x0, sizeof(wsframe_t));
@@ -344,7 +346,7 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
 int
 on_close(buf_t *b, wsframe_t *wsf)
 {
-  if (2<=buf_len(b))
+  if (WS_FRAME_STATUS_LEN<=buf_len(b))
     {
       unsigned short status=ntohs(*(unsigned short*)buf_ref(b));
       buf_fwd(b, 2); /* unsigned short = two bytes */
