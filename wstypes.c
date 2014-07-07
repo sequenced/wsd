@@ -183,6 +183,13 @@ buf_put_short(buf_t *b, unsigned short val)
   b->pos+=2;
 }
 
+inline void
+buf_put_long(buf_t *b, unsigned long long val)
+{
+  *(unsigned long long*)(b->p+b->pos)=val;
+  b->pos+=8;
+}
+
 inline long
 buf_get_long(buf_t *b)
 {

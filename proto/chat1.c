@@ -1,6 +1,7 @@
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 #include "chat1.h"
 
 #define SET_FIN_BIT(byte) (byte|=0x80)
@@ -19,9 +20,25 @@ chat1_on_frame(wschild_conn_t *conn, wsframe_t *wsf, buf_t *b)
   char byte1=0, byte2=0;
   SET_FIN_BIT(byte1);
   SET_OPCODE(byte1, WS_TEXT_FRAME);
-  SET_PAYLOAD_LEN(byte2, wsf->payload_len);
   buf_put(conn->buf_out, byte1);
-  buf_put(conn->buf_out, byte2);
+
+  if (wsf->payload_len<126)
+    {
+      SET_PAYLOAD_LEN(byte2, wsf->payload_len);
+      buf_put(conn->buf_out, byte2);
+    }
+  else if (wsf->payload_len<=USHRT_MAX)
+    {
+      SET_PAYLOAD_LEN(byte2, 126);
+      buf_put(conn->buf_out, byte2);
+      buf_put_short(conn->buf_out, htobe16(wsf->payload_len));
+    }
+  else if (wsf->payload_len<=(ULONG_MAX>>1))
+    {
+      SET_PAYLOAD_LEN(byte2, 127);
+      buf_put(conn->buf_out, byte2);
+      buf_put_long(conn->buf_out, htobe64(wsf->payload_len));
+    }
 
   int len=wsf->payload_len;
   while (len--)

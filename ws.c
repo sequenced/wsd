@@ -4,7 +4,6 @@
 #include <assert.h>
 #include <endian.h>
 #include <sys/types.h>
-#include <arpa/inet.h>
 #include <openssl/sha.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
@@ -330,7 +329,7 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
       if (buf_len(b)<(2+4))
         return -1;
 
-      wsf->payload_len=buf_get_short(b);
+      wsf->payload_len=be16toh(buf_get_short(b));
       wsf->masking_key=buf_get_int(b);
     }
   else if (wsf->payload_len==127)
@@ -338,7 +337,7 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
       if (buf_len(b)<(2+8))
         return -1;
 
-      wsf->payload_len=buf_get_long(b);
+      wsf->payload_len=be64toh(buf_get_long(b));
       wsf->masking_key=buf_get_int(b);
     }
 
@@ -351,7 +350,7 @@ on_close(wschild_conn_t *conn, buf_t *b)
   unsigned short status=0;
   if (WS_FRAME_STATUS_LEN<=buf_len(b))
     {
-      status=ntohs(buf_get_short(b));
+      status=be16toh(buf_get_short(b));
       buf_fwd(b, 2); /* unsigned short = 2 bytes; see RFC6455 section 5.5.1 */
 
       if (wsd_cfg->verbose)
@@ -373,7 +372,7 @@ on_close(wschild_conn_t *conn, buf_t *b)
       SET_PAYLOAD_LEN(byte2, 2); /* 2 = status code typed unsigned short */
       buf_put(conn->buf_out, byte1);
       buf_put(conn->buf_out, byte2);
-      buf_put_short(conn->buf_out, htons(status));
+      buf_put_short(conn->buf_out, htobe16(status));
     }
 
   buf_clear(conn->buf_in);

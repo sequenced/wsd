@@ -95,6 +95,7 @@ void buf_put(buf_t *b, char c);
 char buf_get(buf_t *b);
 unsigned short buf_get_short(buf_t *b);
 void buf_put_short(buf_t *b, unsigned short val);
+void buf_put_long(buf_t *b, unsigned long long val);
 void buf_put_string(buf_t *b, char *s);
 int buf_get_int(buf_t *b);
 long buf_get_long(buf_t *b);
