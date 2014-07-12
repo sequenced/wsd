@@ -7,6 +7,8 @@
 #define HASH32_TABLE_SIZE  256
 #define HASH_ENTRY_BUCKETS 8
 #define UNASSIGNED         (-1)
+#define LOG_VVVERBOSE       3
+#define LOG_VVERBOSE        2
 #define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
 
 typedef struct
@@ -40,6 +42,7 @@ struct wschild_conn
   int (*on_read)(struct wschild_conn *conn);
   int (*on_write)(struct wschild_conn *conn);
   int (*on_data_frame)(struct wschild_conn *conn, wsframe_t *wsf, buf_t *b);
+  void (*on_close)(struct wschild_conn *conn);
   int close_on_write;
 };
 typedef struct wschild_conn wschild_conn_t;
@@ -50,6 +53,8 @@ typedef struct
   char *url;
   char *protocol;
   int (*on_data_frame)(wschild_conn_t *conn, wsframe_t *wsf, buf_t *b);
+  int (*on_open)(wschild_conn_t *conn);
+  void (*on_close)(wschild_conn_t *conn);
 } location_config_t;
 
 typedef struct

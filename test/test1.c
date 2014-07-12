@@ -21,6 +21,12 @@ on_frame(wschild_conn_t *ignored, wsframe_t *this_too, buf_t *b)
   return 0xdeadbeef;
 }
 
+static int
+on_open(wschild_conn_t *ignored)
+{
+  return 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -35,6 +41,7 @@ main(int argc, char **argv)
   loc->url=URI;
   loc->protocol="chat1";
   loc->on_data_frame=on_frame;
+  loc->on_open=on_open;
   list_add_tail(&loc->list_head, &wsd_cfg->location_list);
 
   /* setup record of a connection */

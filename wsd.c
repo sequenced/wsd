@@ -49,7 +49,7 @@ main(int argc, char **argv)
           no_fork_arg=1;
           break;
         case 'v':
-          verbose_arg=1;
+          verbose_arg++;
           break;
         default:
           /* TODO */
@@ -206,6 +206,8 @@ fill_in_config_from_file(wsd_config_t *cfg)
   loc->url="/chatterbox";
   loc->protocol="chat1";
   loc->on_data_frame=chat1_on_frame;
+  loc->on_open=chat1_on_open;
+  loc->on_close=chat1_on_close;
 
   list_add_tail(&loc->list_head, &cfg->location_list);
 

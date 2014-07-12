@@ -207,7 +207,7 @@ http_on_read(wschild_conn_t *conn)
 {
   buf_flip(conn->buf_in);
 
-  if (wsd_cfg->verbose)
+  if (LOG_VVVERBOSE==wsd_cfg->verbose)
     printf("%s", buf_ref(conn->buf_in));
 
   http_req_t hr;

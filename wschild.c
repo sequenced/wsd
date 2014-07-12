@@ -20,8 +20,8 @@
 #define BUF_SIZE 8192
 #define REPLY "<foobar>blah</foobar>"
 
-#define log_addr(msg, addr)                                     \
-  printf(msg, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+#define log_addr(msg, addr, slot)                                       \
+  printf(msg, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), slot);
 
 static int num_pfd=0;
 static struct pollfd pfd[MAX_DESC];
@@ -33,6 +33,7 @@ const wsd_config_t *wsd_cfg=NULL;
 static int on_accept(int fd);
 static int on_read(wschild_conn_t *conn);
 static int on_write(wschild_conn_t *conn);
+static void on_close(const int slot);
 static int io_loop();
 static void sighup(int sig);
 
@@ -200,14 +201,14 @@ on_accept(int fd)
     {
       close(s);
       if (wsd_cfg->verbose)
-        log_addr("no slots: closing: %s:%d\n", cl);
+        log_addr("on_accept: %s:%d, slot=%d: no fee slot, closing\n", cl, slot);
     }
   else
     {
       pfd_alloc(slot, s, POLLIN);
       conn_alloc(slot, &pfd_get(slot));
       if (wsd_cfg->verbose)
-        log_addr("accepting: %s:%d\n", cl);
+        log_addr("on_accept: %s:%d, slot=%d\n", cl, slot);
     }
 
   return 0;
@@ -219,7 +220,7 @@ on_write(wschild_conn_t *conn)
   buf_flip(conn->buf_out);
 
   if (wsd_cfg->verbose)
-    printf("sending %d byte(s)\n", buf_len(conn->buf_out));
+    printf("on_write: %d byte(s)\n", buf_len(conn->buf_out));
 
   int len;
   len=write(conn->pfd->fd,
@@ -250,7 +251,7 @@ on_write(wschild_conn_t *conn)
       if (conn->close_on_write)
         {
           if (wsd_cfg->verbose)
-            printf("closing connection on successful write\n");
+            printf("on_write: close-on-write true and buffer empty\n");
 
           return 0;
         }
@@ -307,9 +308,7 @@ io_loop()
                       if (0>rv)
                         {
                           perror("on_accept");
-                          close(pfd[i].fd);
-                          pfd_free(i);
-                          conn_free(i);
+                          on_close(i);
                         }
                     }
                   else
@@ -319,9 +318,8 @@ io_loop()
                         {
                           if (rv>0)
                             perror("on_read");
-                          close(pfd[i].fd);
-                          pfd_free(i);
-                          conn_free(i);
+
+                          on_close(i);
                         }
                     }
                 }
@@ -333,18 +331,13 @@ io_loop()
                     {
                       if (rv>0)
                         perror("on_write");
-                      close(pfd[i].fd);
-                      pfd_free(i);
-                      conn_free(i);
+
+                      on_close(i);
                     }
                 }
 
               if ((POLLHUP|POLLERR)&pfd[i].revents)
-                {
-                  close(pfd[i].fd);
-                  pfd_free(i);
-                  conn_free(i);
-                }
+                on_close(i);
 
               if (0!=pfd[i].revents)
                 num_sel--;
@@ -364,10 +357,22 @@ sighup(int sig)
   for (i=0; i<MAX_DESC; i++)
     {
       if (pfd_is_in_use(i))
-        {
-          close(pfd_get(i).fd);
-          pfd_free(i);
-          conn_free(i);
-        }
+        on_close(i);
     }
+}
+
+static
+void on_close(const int slot)
+{
+  if (conn[slot].on_close)
+    conn[slot].on_close(&conn[slot]);
+
+  if (0>close(pfd_get(slot).fd))
+    perror("close");
+
+  pfd_free(slot);
+  conn_free(slot);
+
+  if (LOG_VVERBOSE==wsd_cfg->verbose)
+    printf("on_close: slot=%d\n", slot);
 }

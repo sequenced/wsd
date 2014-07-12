@@ -53,9 +53,9 @@ static int prepare_handshake(buf_t *b, http_req_t *hr);
 static int generate_accept_val(buf_t *b, http_req_t *hr);
 static int fill_in_wsframe_details(buf_t *b, wsframe_t *wsf);
 static void decode(buf_t *b, wsframe_t *wsf);
-static int on_close(wschild_conn_t *conn, buf_t *b);
-static int on_ping(buf_t *b, wsframe_t *wsf);
-static int on_pong(buf_t *b, wsframe_t *wsf);
+static int on_close_frame(wschild_conn_t *conn, buf_t *b);
+static int on_ping_frame(buf_t *b, wsframe_t *wsf);
+static int on_pong_frame(buf_t *b, wsframe_t *wsf);
 static int start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf);
 static int dispatch(wschild_conn_t *conn, wsframe_t *wsf);
 static location_config_t *lookup_location(http_req_t *hr);
@@ -185,6 +185,11 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
   conn->on_write=ws_on_write;
   /* hook up protocol handler */
   conn->on_data_frame=loc->on_data_frame;
+  conn->on_close=loc->on_close;
+
+  /* application protocol can reject */
+  if (0>loc->on_open(conn))
+    goto bad;
 
   goto ok;
 
@@ -232,7 +237,7 @@ ws_on_read(wschild_conn_t *conn)
     }
 
   if (wsd_cfg->verbose)
-    printf("ws frame: 0x%hhx, 0x%hhx, 0x%x (opcode)\n",
+    printf("ws_on_read: frame: 0x%hhx, 0x%hhx, 0x%x (opcode)\n",
            wsf.byte1,
            wsf.byte2,
            OPCODE(wsf.byte1));
@@ -257,11 +262,11 @@ dispatch(wschild_conn_t *conn, wsframe_t *wsf)
   buf_slice(&slice, conn->buf_in, wsf->payload_len);
 
   if (0x8==OPCODE(wsf->byte1))
-    rv=on_close(conn, &slice);
+    rv=on_close_frame(conn, &slice);
   else if (0x9==OPCODE(wsf->byte1))
-    rv=on_ping(&slice, wsf);
+    rv=on_ping_frame(&slice, wsf);
   else if (0xa==OPCODE(wsf->byte1))
-    rv=on_pong(&slice, wsf);
+    rv=on_pong_frame(&slice, wsf);
   else if (0x0==OPCODE(wsf->byte1)
            || 0x1==OPCODE(wsf->byte1)
            || 0x2==OPCODE(wsf->byte1))
@@ -344,8 +349,8 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
   return 0;
 }
 
-int
-on_close(wschild_conn_t *conn, buf_t *b)
+static int
+on_close_frame(wschild_conn_t *conn, buf_t *b)
 {
   unsigned short status=0;
   if (WS_FRAME_STATUS_LEN<=buf_len(b))
@@ -367,13 +372,14 @@ on_close(wschild_conn_t *conn, buf_t *b)
   SET_OPCODE(byte1, 0x8);
 
   if (0<status)
-    {
-      /* echo back status code; see RFC6455 section 5.5.1 */
-      SET_PAYLOAD_LEN(byte2, 2); /* 2 = status code typed unsigned short */
-      buf_put(conn->buf_out, byte1);
-      buf_put(conn->buf_out, byte2);
-      buf_put_short(conn->buf_out, htobe16(status));
-    }
+    /* echo back status code; see RFC6455 section 5.5.1 */
+    SET_PAYLOAD_LEN(byte2, 2); /* 2 = status code typed unsigned short */
+
+  buf_put(conn->buf_out, byte1);
+  buf_put(conn->buf_out, byte2);
+
+  if (0<status)
+    buf_put_short(conn->buf_out, htobe16(status));
 
   buf_clear(conn->buf_in);
   conn->pfd->events|=POLLOUT;
@@ -382,19 +388,19 @@ on_close(wschild_conn_t *conn, buf_t *b)
   return 1;
 }
 
-int
-on_ping(buf_t *b, wsframe_t *wsf)
+static int
+on_ping_frame(buf_t *b, wsframe_t *wsf)
 {
   return -1;
 }
 
-int
-on_pong(buf_t *b, wsframe_t *wsf)
+static int
+on_pong_frame(buf_t *b, wsframe_t *wsf)
 {
   return -1;
 }
 
-int
+static int
 start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf)
 {
   if (wsd_cfg->verbose)
@@ -403,7 +409,7 @@ start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf)
   return -1;
 }
 
-int
+static int
 is_valid_proto(http_req_t *hr, location_config_t *loc)
 {
   trim(&(hr->sec_ws_proto));

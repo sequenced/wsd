@@ -33,4 +33,4 @@ clean:
 	rm -f *.o test/*.o .dep wsd test/test[0-9]
 
 .dep:
-	$(CC) -MM -I. `find . -name \*.c` > .dep
+	$(CC) -MM -I. -Iproto `find . -name \*.c` > .dep

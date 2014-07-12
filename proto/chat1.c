@@ -52,3 +52,15 @@ chat1_on_frame(wschild_conn_t *conn, wsframe_t *wsf, buf_t *b)
 
   return 1;
 }
+
+int
+chat1_on_open(wschild_conn_t *conn)
+{
+  return 0;
+}
+
+void
+chat1_on_close(wschild_conn_t *conn)
+{
+  return 0;
+}
