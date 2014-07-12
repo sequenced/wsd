@@ -16,13 +16,13 @@ static const char *EXPECTED_ACCEPT_VAL="s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
 static const int EXPECTED_RET_VAL=1;
 
 static int
-on_frame(ws_conn_t *ignored, wsframe_t *this_too, buf_t *b)
+on_frame(wsconn_t *ignored, wsframe_t *this_too, buf_t *b)
 {
   return 0xdeadbeef;
 }
 
 static int
-on_open(ws_conn_t *ignored)
+on_open(wsconn_t *ignored)
 {
   return 0;
 }
@@ -45,7 +45,7 @@ main(int argc, char **argv)
   list_add_tail(&loc->list_head, &wsd_cfg->location_list);
 
   /* setup record of a connection */
-  ws_conn_t wsc;
+  wsconn_t wsc;
   memset((void*)&wsc, 0x0, sizeof(wsc));
   wsc.pfd=malloc(sizeof(struct pollfd));
   memset((void*)wsc.pfd, 0x0, sizeof(struct pollfd));

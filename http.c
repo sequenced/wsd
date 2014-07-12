@@ -203,7 +203,7 @@ parse_req_line(buf_t *b, http_req_t *hr)
 }
 
 int
-http_on_read(ws_conn_t *conn)
+http_on_read(wsconn_t *conn)
 {
   buf_flip(conn->buf_in);
 
@@ -276,7 +276,7 @@ http_on_read(ws_conn_t *conn)
 }
 
 int
-http_on_write(ws_conn_t *conn)
+http_on_write(wsconn_t *conn)
 {
   return -1;
 }

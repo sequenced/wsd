@@ -25,14 +25,14 @@
 
 static int num_pfd=0;
 static struct pollfd pfd[MAX_DESC];
-static ws_conn_t conn[MAX_CONN];
+static wsconn_t conn[MAX_CONN];
 
 const wsd_config_t *wsd_cfg=NULL;
 
 /* forward declarations */
 static int on_accept(int fd);
-static int on_read(ws_conn_t *conn);
-static int on_write(ws_conn_t *conn);
+static int on_read(wsconn_t *conn);
+static int on_write(wsconn_t *conn);
 static void on_close(const int slot);
 static int io_loop();
 static void sighup(int sig);
@@ -215,7 +215,7 @@ on_accept(int fd)
 }
 
 static int
-on_write(ws_conn_t *conn)
+on_write(wsconn_t *conn)
 {
   buf_flip(conn->buf_out);
 
@@ -261,7 +261,7 @@ on_write(ws_conn_t *conn)
 }
 
 static int
-on_read(ws_conn_t *conn)
+on_read(wsconn_t *conn)
 {
   int len;
   len=read(conn->pfd->fd,
