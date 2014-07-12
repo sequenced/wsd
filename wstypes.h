@@ -41,7 +41,8 @@ struct wsconn
   buf_t *buf_out;
   int (*on_read)(struct wsconn *conn);
   int (*on_write)(struct wsconn *conn);
-  int (*on_data_frame)(struct wsconn *conn, wsframe_t *wsf, buf_t *b);
+  int (*on_data_frame)(struct wsconn *conn, wsframe_t *wsf, buf_t *in,
+                       buf_t *out);
   void (*on_close)(struct wsconn *conn);
   int close_on_write;
 };
@@ -52,7 +53,7 @@ typedef struct
   struct list_head list_head;
   char *url;
   char *protocol;
-  int (*on_data_frame)(wsconn_t *conn, wsframe_t *wsf, buf_t *b);
+  int (*on_data_frame)(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
   int (*on_open)(wsconn_t *conn);
   void (*on_close)(wsconn_t *conn);
 } location_config_t;

@@ -270,7 +270,7 @@ dispatch(wsconn_t *conn, wsframe_t *wsf)
   else if (0x0==OPCODE(wsf->byte1)
            || 0x1==OPCODE(wsf->byte1)
            || 0x2==OPCODE(wsf->byte1))
-    rv=conn->on_data_frame(conn, wsf, &slice);
+    rv=conn->on_data_frame(conn, wsf, &slice, conn->buf_out);
   else
     /* unknown opcode */
     rv=start_closing_handshake(conn, wsf);

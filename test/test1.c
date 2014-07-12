@@ -71,7 +71,7 @@ main(int argc, char **argv)
   buf_flip(wsc.buf_out);
   assert(NULL!=strstr(buf_ref(wsc.buf_out), EXPECTED_ACCEPT_VAL));
   assert(wsc.pfd->events&POLLOUT);
-  assert(0xdeadbeef==wsc.on_data_frame(NULL, NULL, NULL));
+  assert(0xdeadbeef==wsc.on_data_frame(NULL, NULL, NULL, NULL));
 
   free(wsc.pfd);
   free(loc);
