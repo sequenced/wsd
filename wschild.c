@@ -33,9 +33,10 @@ const wsd_config_t *wsd_cfg=NULL;
 static int on_accept(int fd);
 static int on_read(wsconn_t *conn);
 static int on_write(wsconn_t *conn);
-static void on_close(const int slot);
+static void on_close(wsconn_t *conn);
 static int io_loop();
 static void sighup(int sig);
+static void free_conn_and_pfd(const int slot);
 
 static inline int
 conn_init()
@@ -308,7 +309,7 @@ io_loop()
                       if (0>rv)
                         {
                           perror("on_accept");
-                          on_close(i);
+                          free_conn_and_pfd(i);
                         }
                     }
                   else
@@ -319,7 +320,8 @@ io_loop()
                           if (rv>0)
                             perror("on_read");
 
-                          on_close(i);
+                          on_close(&conn[i]);
+                          free_conn_and_pfd(i);
                         }
                     }
                 }
@@ -332,12 +334,16 @@ io_loop()
                       if (rv>0)
                         perror("on_write");
 
-                      on_close(i);
+                      on_close(&conn[i]);
+                      free_conn_and_pfd(i);
                     }
                 }
 
               if ((POLLHUP|POLLERR)&pfd[i].revents)
-                on_close(i);
+                {
+                  on_close(&conn[i]);
+                  free_conn_and_pfd(i);
+                }
 
               if (0!=pfd[i].revents)
                 num_sel--;
@@ -357,16 +363,16 @@ sighup(int sig)
   for (i=0; i<MAX_DESC; i++)
     {
       if (pfd_is_in_use(i))
-        on_close(i);
+        {
+          on_close(&conn[i]);
+          free_conn_and_pfd(i);
+        }
     }
 }
 
-static
-void on_close(const int slot)
+static void
+free_conn_and_pfd(const int slot)
 {
-  if (conn[slot].on_close)
-    conn[slot].on_close(&conn[slot]);
-
   if (0>close(pfd_get(slot).fd))
     perror("close");
 
@@ -374,5 +380,14 @@ void on_close(const int slot)
   conn_free(slot);
 
   if (LOG_VVERBOSE==wsd_cfg->verbose)
-    printf("on_close: slot=%d\n", slot);
+    printf("free_conn_and_pfd: slot=%d\n", slot);
+}
+
+static
+void on_close(wsconn_t *conn)
+{
+  if (LOG_VVERBOSE==wsd_cfg->verbose)
+    printf("on_close:\n");
+
+  conn->on_close(conn);
 }

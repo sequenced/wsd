@@ -183,7 +183,7 @@ ws_on_handshake(wsconn_t *conn, http_req_t *hr)
   /* switch into websocket mode */
   conn->on_read=ws_on_read;
   conn->on_write=ws_on_write;
-  /* hook up protocol handler */
+  /* hook up protocol handlers */
   conn->on_data_frame=loc->on_data_frame;
   conn->on_close=loc->on_close;
 
@@ -359,10 +359,10 @@ on_close_frame(wsconn_t *conn, buf_t *b)
       buf_fwd(b, 2); /* unsigned short = 2 bytes; see RFC6455 section 5.5.1 */
 
       if (wsd_cfg->verbose)
-        printf("close frame: %ud\n", status);
+        printf("on_close_frame: status=%ud\n", status);
     }
   else if (wsd_cfg->verbose)
-    printf("close frame\n");
+    printf("on_close_frame:\n");
 
   if (buf_len(conn->buf_out)<WS_UNMASKED_FRAME_LEN)
     return -1;
