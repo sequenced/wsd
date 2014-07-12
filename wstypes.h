@@ -34,27 +34,27 @@ typedef struct
   unsigned int masking_key;
 } wsframe_t;
 
-struct wschild_conn
+struct ws_conn
 {
   struct pollfd *pfd;
   buf_t *buf_in;
   buf_t *buf_out;
-  int (*on_read)(struct wschild_conn *conn);
-  int (*on_write)(struct wschild_conn *conn);
-  int (*on_data_frame)(struct wschild_conn *conn, wsframe_t *wsf, buf_t *b);
-  void (*on_close)(struct wschild_conn *conn);
+  int (*on_read)(struct ws_conn *conn);
+  int (*on_write)(struct ws_conn *conn);
+  int (*on_data_frame)(struct ws_conn *conn, wsframe_t *wsf, buf_t *b);
+  void (*on_close)(struct ws_conn *conn);
   int close_on_write;
 };
-typedef struct wschild_conn wschild_conn_t;
+typedef struct ws_conn ws_conn_t;
 
 typedef struct
 {
   struct list_head list_head;
   char *url;
   char *protocol;
-  int (*on_data_frame)(wschild_conn_t *conn, wsframe_t *wsf, buf_t *b);
-  int (*on_open)(wschild_conn_t *conn);
-  void (*on_close)(wschild_conn_t *conn);
+  int (*on_data_frame)(ws_conn_t *conn, wsframe_t *wsf, buf_t *b);
+  int (*on_open)(ws_conn_t *conn);
+  void (*on_close)(ws_conn_t *conn);
 } location_config_t;
 
 typedef struct

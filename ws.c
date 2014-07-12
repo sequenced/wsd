@@ -53,11 +53,11 @@ static int prepare_handshake(buf_t *b, http_req_t *hr);
 static int generate_accept_val(buf_t *b, http_req_t *hr);
 static int fill_in_wsframe_details(buf_t *b, wsframe_t *wsf);
 static void decode(buf_t *b, wsframe_t *wsf);
-static int on_close_frame(wschild_conn_t *conn, buf_t *b);
+static int on_close_frame(ws_conn_t *conn, buf_t *b);
 static int on_ping_frame(buf_t *b, wsframe_t *wsf);
 static int on_pong_frame(buf_t *b, wsframe_t *wsf);
-static int start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf);
-static int dispatch(wschild_conn_t *conn, wsframe_t *wsf);
+static int start_closing_handshake(ws_conn_t *conn, wsframe_t *wsf);
+static int dispatch(ws_conn_t *conn, wsframe_t *wsf);
 static location_config_t *lookup_location(http_req_t *hr);
 
 static int
@@ -158,7 +158,7 @@ generate_accept_val(buf_t *b, http_req_t *hr)
 }
 
 int
-ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
+ws_on_handshake(ws_conn_t *conn, http_req_t *hr)
 {
   if (!is_valid_ver(hr))
     goto bad;
@@ -205,7 +205,7 @@ ws_on_handshake(wschild_conn_t *conn, http_req_t *hr)
 }
 
 int
-ws_on_read(wschild_conn_t *conn)
+ws_on_read(ws_conn_t *conn)
 {
   buf_flip(conn->buf_in);
 
@@ -255,7 +255,7 @@ ws_on_read(wschild_conn_t *conn)
 }
 
 int
-dispatch(wschild_conn_t *conn, wsframe_t *wsf)
+dispatch(ws_conn_t *conn, wsframe_t *wsf)
 {
   int rv;
   buf_t slice;
@@ -283,7 +283,7 @@ dispatch(wschild_conn_t *conn, wsframe_t *wsf)
 }
 
 int
-ws_on_write(wschild_conn_t *conn)
+ws_on_write(ws_conn_t *conn)
 {
   return -1;
 }
@@ -350,7 +350,7 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
 }
 
 static int
-on_close_frame(wschild_conn_t *conn, buf_t *b)
+on_close_frame(ws_conn_t *conn, buf_t *b)
 {
   unsigned short status=0;
   if (WS_FRAME_STATUS_LEN<=buf_len(b))
@@ -401,7 +401,7 @@ on_pong_frame(buf_t *b, wsframe_t *wsf)
 }
 
 static int
-start_closing_handshake(wschild_conn_t *conn, wsframe_t *wsf)
+start_closing_handshake(ws_conn_t *conn, wsframe_t *wsf)
 {
   if (wsd_cfg->verbose)
     printf("unknown opcode: 0x%x\n", OPCODE(wsf->byte1));
