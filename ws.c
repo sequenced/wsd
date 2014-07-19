@@ -217,6 +217,8 @@ ws_on_read(wsconn_t *conn)
       return 1;
     }
 
+  int old_pos=buf_pos(conn->buf_in);
+
   wsframe_t wsf;
   memset(&wsf, 0x0, sizeof(wsframe_t));
   wsf.byte1=buf_get(conn->buf_in);
@@ -233,21 +235,24 @@ ws_on_read(wsconn_t *conn)
 
   if (0>fill_in_wsframe_details(conn->buf_in, &wsf))
     {
+      buf_rwnd(conn->buf_in, buf_pos(conn->buf_in)-old_pos);
       buf_flip(conn->buf_in);
       return 1;
     }
 
-  if (wsd_cfg->verbose)
-    printf("ws_on_read: fd=%d: frame: 0x%hhx, 0x%hhx, 0x%x (opcode)\n",
+  if (LOG_VVERBOSE<=wsd_cfg->verbose)
+    printf("ws_on_read: fd=%d: frame: 0x%hhx, 0x%hhx, opcode=0x%x, length=%lu\n",
            conn->pfd->fd,
            wsf.byte1,
            wsf.byte2,
-           OPCODE(wsf.byte1));
+           OPCODE(wsf.byte1),
+           wsf.payload_len);
 
   /* TODO check that payload64 has left-most bit off */
 
   if (buf_len(conn->buf_in)<wsf.payload_len)
     {
+      buf_rwnd(conn->buf_in, buf_pos(conn->buf_in)-old_pos);
       buf_flip(conn->buf_in);
       return 1;
     }
@@ -365,7 +370,7 @@ on_close_frame(wsconn_t *conn, buf_t *b)
   if (WS_FRAME_STATUS_LEN<=buf_len(b))
     status=be16toh(buf_get_short(b));
 
-  if (wsd_cfg->verbose)
+  if (LOG_VVERBOSE<=wsd_cfg->verbose)
     printf("on_close_frame: fd=%d: status=%u\n", conn->pfd->fd, status);
 
   if (!conn->closing)
@@ -425,6 +430,10 @@ prepare_close_frame(buf_t *b, int status)
 static int
 start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status)
 {
+  if (conn->closing)
+    /* closing handshake in progress */
+    return 1;
+
   if (0>prepare_close_frame(conn->buf_out, status))
     return -1;
 

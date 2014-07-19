@@ -78,12 +78,16 @@ conn_free(int slot)
       conn[slot].buf_out=conn[slot+1].buf_out;
       conn[slot].on_read=conn[slot+1].on_read;
       conn[slot].on_write=conn[slot+1].on_write;
+      conn[slot].on_data_frame=conn[slot+1].on_data_frame;
+      conn[slot].on_close=conn[slot+1].on_close;
       conn[slot].close_on_write=conn[slot+1].close_on_write;
       conn[slot].closing=conn[slot+1].closing;
     }
 
-  conn[slot].on_read=http_on_read;
-  conn[slot].on_write=http_on_write;
+  conn[slot].on_read=NULL;
+  conn[slot].on_write=NULL;
+  conn[slot].on_data_frame=NULL;
+  conn[slot].on_close=NULL;
   conn[slot].pfd=NULL;
   buf_clear(conn[slot].buf_in);
   buf_clear(conn[slot].buf_out);
@@ -222,7 +226,7 @@ on_write(wsconn_t *conn)
 {
   buf_flip(conn->buf_out);
 
-  if (wsd_cfg->verbose)
+  if (LOG_VVERBOSE<=wsd_cfg->verbose)
     printf("on_write: fd=%d: %d byte(s)\n",
            conn->pfd->fd, buf_len(conn->buf_out));
 
@@ -254,7 +258,7 @@ on_write(wsconn_t *conn)
 
       if (conn->close_on_write)
         {
-          if (wsd_cfg->verbose)
+          if (LOG_VVERBOSE<=wsd_cfg->verbose)
             printf("on_write: fd=%d: close-on-write true and buffer empty\n",
                    conn->pfd->fd);
 
@@ -390,7 +394,7 @@ free_conn_and_pfd(const int slot)
 static
 void on_close(wsconn_t *conn)
 {
-  if (LOG_VVERBOSE<=wsd_cfg->verbose)
+  if (wsd_cfg->verbose)
     printf("on_close: fd=%d\n", conn->pfd->fd);
 
   conn->on_close(conn);
