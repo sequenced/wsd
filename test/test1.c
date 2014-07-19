@@ -16,7 +16,7 @@ static const char *EXPECTED_ACCEPT_VAL="s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
 static const int EXPECTED_RET_VAL=1;
 
 static int
-on_frame(wsconn_t *ignored, wsframe_t *this_too, buf_t *b)
+on_frame(wsconn_t *ignored, wsframe_t *this_too, buf_t *in, buf_t *out)
 {
   return 0xdeadbeef;
 }

@@ -9,28 +9,42 @@ chatterbox1_t box;
 int
 chat1_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 {
-  printf("chat1: ");
-  while (0<buf_len(in))
-    printf("%c", buf_get(in));
-  printf("\n");
+  const int len=buf_len(in);
 
-  char byte1=0;
-  wsapp_set_fin_bit(byte1);
-  wsapp_set_opcode(byte1, WSAPP_WS_TEXT_FRAME);
-  buf_put(out, byte1);
-  wsapp_set_payload_len(out, wsf->payload_len);
-
-  int len=wsf->payload_len;
-  while (len--)
+  if (LOG_VVVERBOSE<=wsd_cfg->verbose)
     {
-      buf_rwnd(in, 1);
-      buf_put(out, buf_get(in));
-      buf_rwnd(in, 1);
+      printf("chat1: fd=%d: ", conn->pfd->fd);
+      while (0<buf_len(in))
+        printf("%c", buf_get(in));
+      printf("\n");
+      buf_rwnd(in, len);
     }
 
-  /* TODO sent payload to other connections */
+  chat_t *cursor=0;
+  list_for_each_entry(cursor, &box.chat_list, list_head)
+    {
+      long frame_len=wsapp_calculate_frame_length(len);
+      if (0>frame_len)
+        /* frame too large, silently ignore */
+        continue;
 
-  conn->pfd->events|=POLLOUT;
+      if (buf_len(cursor->conn->buf_out)<frame_len)
+        /* buffer too small, silently ignore this frame */
+        continue;
+
+      char byte1=0;
+      wsapp_set_fin_bit(byte1);
+      wsapp_set_opcode(byte1, WSAPP_WS_TEXT_FRAME);
+      buf_put(cursor->conn->buf_out, byte1);
+      wsapp_set_payload_len(cursor->conn->buf_out, len);
+
+      while (0<buf_len(in))
+        buf_put(cursor->conn->buf_out, buf_get(in));
+
+      buf_rwnd(in, len);
+
+      cursor->conn->pfd->events|=POLLOUT;
+    }
 
   return 1;
 }
@@ -58,11 +72,11 @@ chat1_on_open(wsconn_t *conn)
 void
 chat1_on_close(wsconn_t *conn)
 {
-  chat_t *rv=0, *pos=0;
-  list_for_each_entry(pos, &box.chat_list, list_head)
+  chat_t *rv=0, *cursor=0;
+  list_for_each_entry(cursor, &box.chat_list, list_head)
     {
-      if (conn==pos->conn)
-        rv=pos;
+      if (conn==cursor->conn)
+        rv=cursor;
     }
 
   if (rv)

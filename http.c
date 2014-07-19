@@ -207,8 +207,8 @@ http_on_read(wsconn_t *conn)
 {
   buf_flip(conn->buf_in);
 
-  if (LOG_VVVERBOSE==wsd_cfg->verbose)
-    printf("%s", buf_ref(conn->buf_in));
+  if (LOG_VVVERBOSE<=wsd_cfg->verbose)
+    printf("http_on_read: fd=%d: %s", conn->pfd->fd, buf_ref(conn->buf_in));
 
   http_req_t hr;
   memset(&hr, 0x0, sizeof(hr));

@@ -18,10 +18,9 @@
 #define MAX_DESC 32
 #define MAX_CONN MAX_DESC
 #define BUF_SIZE 8192
-#define REPLY "<foobar>blah</foobar>"
 
-#define log_addr(msg, addr, slot)                                       \
-  printf(msg, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), slot);
+#define log_addr(msg, addr, fd, slot)                                   \
+  printf(msg, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), fd, slot);
 
 static int num_pfd=0;
 static struct pollfd pfd[MAX_DESC];
@@ -202,14 +201,15 @@ on_accept(int fd)
     {
       close(s);
       if (wsd_cfg->verbose)
-        log_addr("on_accept: %s:%d, slot=%d: no fee slot, closing\n", cl, slot);
+        log_addr("on_accept: %s:%d: fd=%d: slot=%d: no fee slot, closing\n",
+                 cl, s, slot);
     }
   else
     {
       pfd_alloc(slot, s, POLLIN);
       conn_alloc(slot, &pfd_get(slot));
       if (wsd_cfg->verbose)
-        log_addr("on_accept: %s:%d, slot=%d\n", cl, slot);
+        log_addr("on_accept: %s:%d: fd=%d: slot=%d\n", cl, s, slot);
     }
 
   return 0;
@@ -221,7 +221,8 @@ on_write(wsconn_t *conn)
   buf_flip(conn->buf_out);
 
   if (wsd_cfg->verbose)
-    printf("on_write: %d byte(s)\n", buf_len(conn->buf_out));
+    printf("on_write: fd=%d: %d byte(s)\n",
+           conn->pfd->fd, buf_len(conn->buf_out));
 
   int len;
   len=write(conn->pfd->fd,
@@ -252,7 +253,8 @@ on_write(wsconn_t *conn)
       if (conn->close_on_write)
         {
           if (wsd_cfg->verbose)
-            printf("on_write: close-on-write true and buffer empty\n");
+            printf("on_write: fd=%d: close-on-write true and buffer empty\n",
+                   conn->pfd->fd);
 
           return 0;
         }
@@ -373,21 +375,21 @@ sighup(int sig)
 static void
 free_conn_and_pfd(const int slot)
 {
+  if (LOG_VVERBOSE<=wsd_cfg->verbose)
+    printf("free_conn_and_pfd: fd=%d: slot=%d\n", pfd_get(slot).fd, slot);
+
   if (0>close(pfd_get(slot).fd))
     perror("close");
 
   pfd_free(slot);
   conn_free(slot);
-
-  if (LOG_VVERBOSE==wsd_cfg->verbose)
-    printf("free_conn_and_pfd: slot=%d\n", slot);
 }
 
 static
 void on_close(wsconn_t *conn)
 {
-  if (LOG_VVERBOSE==wsd_cfg->verbose)
-    printf("on_close:\n");
+  if (LOG_VVERBOSE<=wsd_cfg->verbose)
+    printf("on_close: fd=%d\n", conn->pfd->fd);
 
   conn->on_close(conn);
 }

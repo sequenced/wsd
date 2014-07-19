@@ -237,7 +237,8 @@ ws_on_read(wsconn_t *conn)
     }
 
   if (wsd_cfg->verbose)
-    printf("ws_on_read: frame: 0x%hhx, 0x%hhx, 0x%x (opcode)\n",
+    printf("ws_on_read: fd=%d: frame: 0x%hhx, 0x%hhx, 0x%x (opcode)\n",
+           conn->pfd->fd,
            wsf.byte1,
            wsf.byte2,
            OPCODE(wsf.byte1));
@@ -359,10 +360,10 @@ on_close_frame(wsconn_t *conn, buf_t *b)
       buf_fwd(b, 2); /* unsigned short = 2 bytes; see RFC6455 section 5.5.1 */
 
       if (wsd_cfg->verbose)
-        printf("on_close_frame: status=%ud\n", status);
+        printf("on_close_frame: fd=%d: status=%ud\n", conn->pfd->fd, status);
     }
   else if (wsd_cfg->verbose)
-    printf("on_close_frame:\n");
+    printf("on_close_frame: fd=%d\n", conn->pfd->fd);
 
   if (buf_len(conn->buf_out)<WS_UNMASKED_FRAME_LEN)
     return -1;
@@ -404,7 +405,9 @@ static int
 start_closing_handshake(wsconn_t *conn, wsframe_t *wsf)
 {
   if (wsd_cfg->verbose)
-    printf("unknown opcode: 0x%x\n", OPCODE(wsf->byte1));
+    printf("unknown opcode: fd=%d: 0x%x\n", conn->pfd->fd, OPCODE(wsf->byte1));
+
+  /* TODO implement */
 
   return -1;
 }
