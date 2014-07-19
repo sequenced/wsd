@@ -6,12 +6,12 @@ include .dep
 
 CFLAGS = -Wall -ggdb -I. -Iproto -L.
 
-wsd:	wsd.o wschild.o http.o ws.o wstypes.o proto/chat1.o
+wsd:	wsd.o wschild.o http.o ws.o wstypes.o proto/chatterbox1.o
 	$(CC) $(CFLAGS) -lrt -lssl $^ -o $@
 
 test:	test/test1 test/test2 test/test3 test/test4
 
-test/test1:	test/test1.o ws.o http.o wstypes.o proto/chat1.o
+test/test1:	test/test1.o ws.o http.o wstypes.o proto/chatterbox1.o
 	$(CC) $(CFLAGS) -lrt -lssl $^ -o $@
 
 test/test2:	test/test2.o wstypes.o

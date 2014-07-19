@@ -34,7 +34,7 @@ chatterbox1_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 
       char byte1=0;
       wsapp_set_fin_bit(byte1);
-      wsapp_set_opcode(byte1, WSAPP_WS_TEXT_FRAME);
+      wsapp_set_opcode(byte1, WS_TEXT_FRAME);
       buf_put(cursor->conn->buf_out, byte1);
       wsapp_set_payload_len(cursor->conn->buf_out, len);
 

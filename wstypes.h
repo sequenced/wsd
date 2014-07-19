@@ -45,6 +45,7 @@ struct wsconn
                        buf_t *out);
   void (*on_close)(struct wsconn *conn);
   int close_on_write;
+  int closing;
 };
 typedef struct wsconn wsconn_t;
 

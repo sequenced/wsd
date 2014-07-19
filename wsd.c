@@ -14,7 +14,7 @@
 #include "wstypes.h"
 #include "wschild.h"
 #include "list.h"
-#include "chat1.h" /* TODO make configurable */
+#include "chatterbox1.h" /* TODO make configurable */
 
 static const char *ident="wsd";
 static int drop_priv(uid_t new_uid);
@@ -204,10 +204,10 @@ fill_in_config_from_file(wsd_config_t *cfg)
     return -1;
 
   loc->url="/chatterbox";
-  loc->protocol="chat1";
-  loc->on_data_frame=chat1_on_frame;
-  loc->on_open=chat1_on_open;
-  loc->on_close=chat1_on_close;
+  loc->protocol="chatterbox1";
+  loc->on_data_frame=chatterbox1_on_frame;
+  loc->on_open=chatterbox1_on_open;
+  loc->on_close=chatterbox1_on_close;
 
   list_add_tail(&loc->list_head, &cfg->location_list);
 

@@ -56,7 +56,8 @@ static void decode(buf_t *b, wsframe_t *wsf);
 static int on_close_frame(wsconn_t *conn, buf_t *b);
 static int on_ping_frame(buf_t *b, wsframe_t *wsf);
 static int on_pong_frame(buf_t *b, wsframe_t *wsf);
-static int start_closing_handshake(wsconn_t *conn, wsframe_t *wsf);
+static int start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status);
+static int prepare_close_frame(buf_t *b, int status);
 static int dispatch(wsconn_t *conn, wsframe_t *wsf);
 static location_config_t *lookup_location(http_req_t *hr);
 
@@ -262,19 +263,25 @@ dispatch(wsconn_t *conn, wsframe_t *wsf)
   buf_t slice;
   buf_slice(&slice, conn->buf_in, wsf->payload_len);
 
-  if (0x8==OPCODE(wsf->byte1))
+  if (WS_CLOSE_FRAME==OPCODE(wsf->byte1))
     rv=on_close_frame(conn, &slice);
-  else if (0x9==OPCODE(wsf->byte1))
+  else if (WS_PING_FRAME==OPCODE(wsf->byte1))
     rv=on_ping_frame(&slice, wsf);
-  else if (0xa==OPCODE(wsf->byte1))
+  else if (WS_PONG_FRAME==OPCODE(wsf->byte1))
     rv=on_pong_frame(&slice, wsf);
   else if (0x0==OPCODE(wsf->byte1)
-           || 0x1==OPCODE(wsf->byte1)
-           || 0x2==OPCODE(wsf->byte1))
+           || WS_TEXT_FRAME==OPCODE(wsf->byte1)
+           || WS_BINARY_FRAME==OPCODE(wsf->byte1))
     rv=conn->on_data_frame(conn, wsf, &slice, conn->buf_out);
   else
-    /* unknown opcode */
-    rv=start_closing_handshake(conn, wsf);
+    {
+      if (wsd_cfg->verbose)
+        printf("unknown opcode: fd=%d: 0x%x\n",
+               conn->pfd->fd, OPCODE(wsf->byte1));
+
+      /* unknown opcode */
+      rv=start_closing_handshake(conn, wsf, WS_1011);
+    }
 
   /* clear buffer by consuming this frame's payload */
   buf_fwd(conn->buf_in, wsf->payload_len);
@@ -353,40 +360,31 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
 static int
 on_close_frame(wsconn_t *conn, buf_t *b)
 {
+  int rv=1;
   unsigned short status=0;
   if (WS_FRAME_STATUS_LEN<=buf_len(b))
+    status=be16toh(buf_get_short(b));
+
+  if (wsd_cfg->verbose)
+    printf("on_close_frame: fd=%d: status=%u\n", conn->pfd->fd, status);
+
+  if (!conn->closing)
     {
-      status=be16toh(buf_get_short(b));
-      buf_fwd(b, 2); /* unsigned short = 2 bytes; see RFC6455 section 5.5.1 */
+      if (0>prepare_close_frame(conn->buf_out, status))
+        return -1;
 
-      if (wsd_cfg->verbose)
-        printf("on_close_frame: fd=%d: status=%ud\n", conn->pfd->fd, status);
+      conn->pfd->events|=POLLOUT;
+      conn->close_on_write=1;
+      conn->closing=1;
     }
-  else if (wsd_cfg->verbose)
-    printf("on_close_frame: fd=%d\n", conn->pfd->fd);
+  else
+    /* closing handshake completed (reply to our earlier close frame) */
+    rv=-1;
 
-  if (buf_len(conn->buf_out)<WS_UNMASKED_FRAME_LEN)
-    return -1;
-
-  char byte1=0, byte2=0;
-  SET_FIN_BIT(byte1);
-  SET_OPCODE(byte1, 0x8);
-
-  if (0<status)
-    /* echo back status code; see RFC6455 section 5.5.1 */
-    SET_PAYLOAD_LEN(byte2, 2); /* 2 = status code typed unsigned short */
-
-  buf_put(conn->buf_out, byte1);
-  buf_put(conn->buf_out, byte2);
-
-  if (0<status)
-    buf_put_short(conn->buf_out, htobe16(status));
-
+  /* don't process data after close frame, see RFC6455 section 5.5.1 */
   buf_clear(conn->buf_in);
-  conn->pfd->events|=POLLOUT;
-  conn->close_on_write=1;
 
-  return 1;
+  return rv;
 }
 
 static int
@@ -402,14 +400,42 @@ on_pong_frame(buf_t *b, wsframe_t *wsf)
 }
 
 static int
-start_closing_handshake(wsconn_t *conn, wsframe_t *wsf)
+prepare_close_frame(buf_t *b, int status)
 {
-  if (wsd_cfg->verbose)
-    printf("unknown opcode: fd=%d: 0x%x\n", conn->pfd->fd, OPCODE(wsf->byte1));
+  if (buf_len(b)<WS_UNMASKED_FRAME_LEN)
+    return -1;
 
-  /* TODO implement */
+  char byte1=0, byte2=0;
+  SET_FIN_BIT(byte1);
+  SET_OPCODE(byte1, WS_CLOSE_FRAME);
 
-  return -1;
+  if (0<status)
+    /* echo back status code; see RFC6455 section 5.5.1 */
+    SET_PAYLOAD_LEN(byte2, 2); /* 2 = status code typed unsigned short */
+
+  buf_put(b, byte1);
+  buf_put(b, byte2);
+
+  if (0<status)
+    buf_put_short(b, htobe16(status));
+
+  return 0;
+}
+
+static int
+start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status)
+{
+  if (0>prepare_close_frame(conn->buf_out, status))
+    return -1;
+
+  conn->pfd->events|=POLLOUT;
+  conn->closing=1;
+
+  if (LOG_VVERBOSE<=wsd_cfg->verbose)
+    printf("starting_closing_handshake: fd=%d: status=%u\n",
+           conn->pfd->fd, status);
+
+  return 1;
 }
 
 static int

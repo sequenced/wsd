@@ -2,6 +2,7 @@
 #define __WSAPP_H__
 
 #include <limits.h>
+#include "ws.h"
 #include "wstypes.h"
 
 extern wsd_config_t *wsd_cfg;
@@ -14,9 +15,6 @@ extern wsd_config_t *wsd_cfg;
 #define WSAPP_PAYLOAD_7BITS       1
 #define WSAPP_PAYLOAD_7PLUS16BITS 2
 #define WSAPP_PAYLOAD_7PLUS64BITS 9
-
-#define WSAPP_WS_TEXT_FRAME   0x1
-#define WSAPP_WS_BINARY_FRAME 0x2
 
 static long
 wsapp_calculate_frame_length(const unsigned long payload_len)

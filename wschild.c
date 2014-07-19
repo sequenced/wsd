@@ -79,6 +79,7 @@ conn_free(int slot)
       conn[slot].on_read=conn[slot+1].on_read;
       conn[slot].on_write=conn[slot+1].on_write;
       conn[slot].close_on_write=conn[slot+1].close_on_write;
+      conn[slot].closing=conn[slot+1].closing;
     }
 
   conn[slot].on_read=http_on_read;
@@ -87,7 +88,8 @@ conn_free(int slot)
   buf_clear(conn[slot].buf_in);
   buf_clear(conn[slot].buf_out);
   conn[slot].close_on_write=0;
-  
+  conn[slot].closing=0;
+
   return 0;
 }
 
