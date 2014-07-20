@@ -72,17 +72,14 @@ chatterbox1_on_open(wsconn_t *conn)
 void
 chatterbox1_on_close(wsconn_t *conn)
 {
-  chat_t *rv=0, *cursor=0;
-  list_for_each_entry(cursor, &box.chat_list, list_head)
+  chat_t *cursor=0, *tmp=0;
+  list_for_each_entry_safe(cursor, tmp, &box.chat_list, list_head)
     {
       if (conn==cursor->conn)
-        rv=cursor;
-    }
-
-  if (rv)
-    {
-      list_del(&rv->list_head);
-      free(rv);
-      rv=0;
+        {
+          list_del(&cursor->list_head);
+          free(cursor);
+          cursor=0;
+        }
     }
 }

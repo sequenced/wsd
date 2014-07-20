@@ -51,5 +51,13 @@ main(int argc, char **argv)
         && 0!=strcmp("three", e->string))
       return 1;
 
+  assert(!list_empty(&t.string_list));
+
+  test4_string_t *tmp;
+  list_for_each_entry_safe(e, tmp, &t.string_list, list_head)
+    list_del(&e->list_head);
+
+  assert(list_empty(&t.string_list));
+
   return 0;
 }
