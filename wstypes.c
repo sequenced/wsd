@@ -65,6 +65,15 @@ buf_get(buf_t *b)
   return c;
 }
 
+inline char
+buf_safe_get(buf_t *b)
+{
+  if (0<buf_len(b))
+    return buf_get(b);
+
+  return '\0';
+}
+
 inline char*
 buf_ref(buf_t *b)
 {
@@ -235,7 +244,7 @@ buf_slice(buf_t *a, buf_t *b, int len)
 }
 
 inline void
-buf_put_string(buf_t *b, char *s)
+buf_put_string(buf_t *b, const char *s)
 {
   while ('\0'!=*s)
     buf_put(b, *s++);

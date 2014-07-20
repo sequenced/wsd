@@ -1,26 +1,28 @@
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <syslog.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <signal.h>
 #include <string.h>
-#include <sys/types.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include "wstypes.h"
 #include "wschild.h"
 #include "list.h"
+#include "config_parser.h"
 #include "chatterbox1.h" /* TODO make configurable */
 
 static const char *ident="wsd";
 static int drop_priv(uid_t new_uid);
 static void sighup(int);
 static int open_socket(int p);
-static int fill_in_config_from_file(wsd_config_t *cfg);
+static int fill_in_config_from_file(wsd_config_t *cfg, const char* filename);
 
 int
 main(int argc, char **argv)
@@ -29,13 +31,17 @@ main(int argc, char **argv)
   int port_arg=3000; /* default */
   int no_fork_arg=0;
   int verbose_arg=0;
+  const char *filename_arg="/etc/wsd.conf"; /* default */
   const char *host_arg=NULL;
   const char *user_arg=NULL;
 
-  while ((opt=getopt(argc, argv, "h:p:u:fv"))!=-1)
+  while ((opt=getopt(argc, argv, "h:p:u:f:dv"))!=-1)
     {
       switch (opt)
         {
+        case 'f':
+          filename_arg=optarg;
+          break;
         case 'h':
           host_arg=optarg;
           break;
@@ -45,7 +51,7 @@ main(int argc, char **argv)
         case 'p':
           port_arg=atoi(optarg);
           break;
-        case 'f':
+        case 'd':
           no_fork_arg=1;
           break;
         case 'v':
@@ -86,10 +92,9 @@ main(int argc, char **argv)
   cfg.verbose=verbose_arg;
   cfg.no_fork=no_fork_arg;
 
-  if (0>fill_in_config_from_file(&cfg))
+  if (0>fill_in_config_from_file(&cfg, filename_arg))
     {
-      /* TODO */
-      fprintf(stderr, "config file\n");
+      fprintf(stderr, "syntax error(s) in file %s, exiting...\n", filename_arg);
       exit(1);
     }
 
@@ -194,22 +199,59 @@ open_socket(int p)
 }
 
 static int
-fill_in_config_from_file(wsd_config_t *cfg)
+fill_in_config_from_file(wsd_config_t *cfg, const char* filename)
 {
-  /* TODO actually read file */
+  int fd;
+  if (0>(fd=open(filename, O_RDONLY)))
+    {
+      perror("open");
+      return -1;
+    }
+
+  struct stat sb;
+  if (0>fstat(fd, &sb))
+    {
+      perror("fstat");
+      close(fd);
+      return -1;
+    }
+
+  buf_t *b;
+  if (NULL==(b=buf_alloc(sb.st_size)))
+    {
+      perror("buf_alloc");
+      close(fd);
+      return -1;
+    }
+
+  int len=read(fd, buf_ref(b), buf_len(b));
+  close(fd);
+  if (0>len)
+    {
+      perror("read");
+      buf_free(b);
+      return -1;
+    }
+  buf_fwd(b, len);
+  buf_flip(b);
+
   init_list_head(&cfg->location_list);
 
-  location_config_t *loc;
-  if (!(loc=malloc(sizeof(location_config_t))))
+  if (0>parse_config(&cfg->location_list, b))
     return -1;
 
-  loc->url="/chatterbox";
-  loc->protocol="chatterbox1";
-  loc->on_data_frame=chatterbox1_on_frame;
-  loc->on_open=chatterbox1_on_open;
-  loc->on_close=chatterbox1_on_close;
+  /* TODO resolve through shared library mechanism */
 
-  list_add_tail(&loc->list_head, &cfg->location_list);
+  location_config_t *cursor;
+  list_for_each_entry(cursor, &cfg->location_list, list_head)
+    {
+      if (0==strcmp("chatterbox1", cursor->protocol))
+        {
+          cursor->on_data_frame=chatterbox1_on_frame;
+          cursor->on_open=chatterbox1_on_open;
+          cursor->on_close=chatterbox1_on_close;
+        }
+    }
 
   return 0;
 }
