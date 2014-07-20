@@ -1,12 +1,12 @@
-#ifndef __CHATTERBOX1_H__
-#define __CHATTERBOX1_H__
+#ifndef __CHATTERBOX_H__
+#define __CHATTERBOX_H__
 
 #include "wsapp.h"
 #include "list.h"
 
-int chatterbox1_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
-int chatterbox1_on_open(wsconn_t *conn);
-void chatterbox1_on_close(wsconn_t *conn);
+int chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
+int chatterbox_on_open(wsconn_t *conn);
+void chatterbox_on_close(wsconn_t *conn);
 
 typedef struct
 {
@@ -18,6 +18,6 @@ typedef struct
 {
   struct list_head list_head;
   struct list_head chat_list;
-} chatterbox1_t;
+} chatterbox_t;
 
-#endif /* #ifndef __CHATTERBOX1_H__ */
+#endif /* #ifndef __CHATTERBOX_H__ */

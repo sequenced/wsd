@@ -2,18 +2,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "chatterbox1.h"
+#include "chatterbox.h"
 
-chatterbox1_t box;
+chatterbox_t box;
 
 int
-chatterbox1_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
+chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 {
   const int len=buf_len(in);
 
   if (LOG_VVVERBOSE<=wsd_cfg->verbose)
     {
-      printf("chatterbox1: fd=%d: ", conn->pfd->fd);
+      printf("chatterbox: fd=%d: ", conn->pfd->fd);
       while (0<buf_len(in))
         printf("%c", buf_get(in));
       printf("\n");
@@ -50,7 +50,7 @@ chatterbox1_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 }
 
 int
-chatterbox1_on_open(wsconn_t *conn)
+chatterbox_on_open(wsconn_t *conn)
 {
   static char once=1;
 
@@ -70,7 +70,7 @@ chatterbox1_on_open(wsconn_t *conn)
 }
 
 void
-chatterbox1_on_close(wsconn_t *conn)
+chatterbox_on_close(wsconn_t *conn)
 {
   chat_t *cursor=0, *tmp=0;
   list_for_each_entry_safe(cursor, tmp, &box.chat_list, list_head)

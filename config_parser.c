@@ -282,6 +282,12 @@ parse_value(buf_t *input, string_t *value)
 
   value->len=buf_pos(input)-old_pos-1;
 
+  if (value->len>CONFIG_MAX_VALUE_LENGTH)
+    {
+      fprintf(stderr, "value too long on line %d\n", line);
+      return -1;
+    }
+
   /* put back, don't consume */
   if ('<'==c)
     buf_rwnd(input, 1);

@@ -397,5 +397,6 @@ void on_close(wsconn_t *conn)
   if (wsd_cfg->verbose)
     printf("on_close: fd=%d\n", conn->pfd->fd);
 
-  conn->on_close(conn);
+  if (conn->on_close)
+    conn->on_close(conn);
 }

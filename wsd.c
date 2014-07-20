@@ -3,6 +3,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
+#include <dlfcn.h>
 #include <stdlib.h>
 #include <syslog.h>
 #include <stdio.h>
@@ -16,13 +17,13 @@
 #include "wschild.h"
 #include "list.h"
 #include "config_parser.h"
-#include "chatterbox1.h" /* TODO make configurable */
 
 static const char *ident="wsd";
 static int drop_priv(uid_t new_uid);
 static void sighup(int);
 static int open_socket(int p);
 static int fill_in_config_from_file(wsd_config_t *cfg, const char* filename);
+static int resolve_dl_dependencies(struct list_head *parent);
 
 int
 main(int argc, char **argv)
@@ -240,16 +241,56 @@ fill_in_config_from_file(wsd_config_t *cfg, const char* filename)
   if (0>parse_config(&cfg->location_list, b))
     return -1;
 
-  /* TODO resolve through shared library mechanism */
+  if (0>resolve_dl_dependencies(&cfg->location_list))
+    return -1;
+
+  return 0;
+}
+
+static int
+resolve_dl_dependencies(struct list_head *parent)
+{
+  const int buf_len=CONFIG_MAX_VALUE_LENGTH*2; 
+  char buf[buf_len];
 
   location_config_t *cursor;
-  list_for_each_entry(cursor, &cfg->location_list, list_head)
+  list_for_each_entry(cursor, parent, list_head)
     {
-      if (0==strcmp("chatterbox1", cursor->protocol))
+      memset((void*)buf, 0x0, buf_len);
+      sprintf(buf, "lib%s.so", cursor->protocol);
+
+      void *handle=dlopen(buf, RTLD_NOW);
+      if (NULL==handle)
         {
-          cursor->on_data_frame=chatterbox1_on_frame;
-          cursor->on_open=chatterbox1_on_open;
-          cursor->on_close=chatterbox1_on_close;
+          perror("dlopen");
+          return -1;
+        }
+
+      memset((void*)buf, 0x0, buf_len);
+      sprintf(buf, "%s_on_frame", cursor->protocol);
+      cursor->on_data_frame=dlsym(handle, buf);
+      if (NULL==cursor->on_data_frame)
+        {
+          perror("dlsym");
+          return -1;
+        }
+
+      memset((void*)buf, 0x0, buf_len);
+      sprintf(buf, "%s_on_open", cursor->protocol);
+      cursor->on_open=dlsym(handle, buf);
+      if (NULL==cursor->on_open)
+        {
+          perror("dlsym");
+          return -1;
+        }
+
+      memset((void*)buf, 0x0, buf_len);
+      sprintf(buf, "%s_on_close", cursor->protocol);
+      cursor->on_close=dlsym(handle, buf);
+      if (NULL==cursor->on_close)
+        {
+          perror("dlsym");
+          return -1;
         }
     }
 
