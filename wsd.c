@@ -292,6 +292,8 @@ resolve_dl_dependencies(struct list_head *parent)
           perror("dlsym");
           return -1;
         }
+
+      /* TODO retain dl handle for unloading later */
     }
 
   return 0;
