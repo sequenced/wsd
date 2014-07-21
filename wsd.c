@@ -94,10 +94,7 @@ main(int argc, char **argv)
   cfg.no_fork=no_fork_arg;
 
   if (0>fill_in_config_from_file(&cfg, filename_arg))
-    {
-      fprintf(stderr, "syntax error(s) in file %s, exiting...\n", filename_arg);
-      exit(1);
-    }
+    exit(1);
 
   openlog(ident, LOG_PID, LOG_USER);
   syslog(LOG_INFO, "starting");
@@ -262,7 +259,7 @@ resolve_dl_dependencies(struct list_head *parent)
       void *handle=dlopen(buf, RTLD_NOW);
       if (NULL==handle)
         {
-          perror("dlopen");
+          fprintf(stderr, "%s\n", dlerror());
           return -1;
         }
 
@@ -271,7 +268,7 @@ resolve_dl_dependencies(struct list_head *parent)
       cursor->on_data_frame=dlsym(handle, buf);
       if (NULL==cursor->on_data_frame)
         {
-          perror("dlsym");
+          fprintf(stderr, "%s\n", dlerror());
           return -1;
         }
 
@@ -280,7 +277,7 @@ resolve_dl_dependencies(struct list_head *parent)
       cursor->on_open=dlsym(handle, buf);
       if (NULL==cursor->on_open)
         {
-          perror("dlsym");
+          fprintf(stderr, "%s\n", dlerror());
           return -1;
         }
 
@@ -289,7 +286,7 @@ resolve_dl_dependencies(struct list_head *parent)
       cursor->on_close=dlsym(handle, buf);
       if (NULL==cursor->on_close)
         {
-          perror("dlsym");
+          fprintf(stderr, "%s\n", dlerror());
           return -1;
         }
 
