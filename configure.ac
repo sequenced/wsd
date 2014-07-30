@@ -5,6 +5,7 @@ AC_PREREQ([2.67])
 AC_INIT([wsd], [0.9], [bugs@sequencedsystems.com])
 AC_CONFIG_SRCDIR([src/wsd.c])
 AM_INIT_AUTOMAKE([-Wall -Werror])
+AM_PROG_AR
 AC_CONFIG_HEADERS([src/config.h])
 AC_CONFIG_FILES([
  Makefile
