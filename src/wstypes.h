@@ -36,6 +36,7 @@ typedef struct
 
 struct wsconn
 {
+  struct list_head list_head;
   struct pollfd *pfd;
   buf_t *buf_in;
   buf_t *buf_out;
