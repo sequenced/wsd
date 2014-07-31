@@ -26,6 +26,13 @@ static int num_pfd=0;
 static struct pollfd pfd[MAX_DESC];
 static wsconn_t conn[MAX_CONN];
 
+typedef struct
+{
+  struct list_head list_head;
+  struct list_head connection_list;
+} wschild_t;
+static wschild_t *wsc=NULL;
+
 const wsd_config_t *wsd_cfg=NULL;
 
 /* forward declarations */
@@ -36,6 +43,7 @@ static void on_close(wsconn_t *conn);
 static int io_loop();
 static void sighup(int sig);
 static void free_conn_and_pfd(const int slot);
+static wsconn_t *alloc_connection(int fd, short events);
 
 static inline int
 conn_init()
@@ -48,6 +56,22 @@ conn_init()
       return -1;
 
   return 0;
+}
+
+static inline wsconn_t*
+alloc_connection(int fd, short events)
+{
+  wsconn_t *c=malloc(sizeof(wsconn_t));
+  if (!c)
+    return NULL;
+
+  memset((void*)c, 0x0, sizeof(wsconn_t));
+  c->pfd->fd=fd;
+  c->pfd->events=events;
+  c->on_read=http_on_read;
+  c->on_write=http_on_write;
+
+  return c;
 }
 
 static inline int
@@ -165,17 +189,34 @@ wschild_main(const wsd_config_t *cfg)
       exit(1);
     }
 
-  pfd_init();
-  if (0>conn_init())
+  if (!(wsc=malloc(sizeof(wschild_t))))
     {
-      perror("conn_init");
+      perror("malloc");
       exit(1);
     }
+  memset((void*)wsc, 0x0, sizeof(wschild_t));
+  init_list_head(&wsc->connection_list);
 
-  int slot;
-  slot=pfd_find_free_slot();
-  pfd_alloc(slot, wsd_cfg->sock, POLLIN);
-  conn_alloc(slot, &pfd_get(slot));
+  wsconn_t *conn;
+  if (!(conn=alloc_connection(wsd_cfg->sock, POLLIN)))
+    {
+      perror("alloc_connection");
+      exit(1);
+    }
+  list_add_tail(&conn->list_head, &wsc->connection_list);
+  
+
+  /* pfd_init(); */
+  /* if (0>conn_init()) */
+  /*   { */
+  /*     perror("conn_init"); */
+  /*     exit(1); */
+  /*   } */
+
+  /* int slot; */
+  /* slot=pfd_find_free_slot(); */
+  /* pfd_alloc(slot, wsd_cfg->sock, POLLIN); */
+  /* conn_alloc(slot, &pfd_get(slot)); */
 
   struct sigaction act;
   memset(&act, 0x0, sizeof(struct sigaction));
@@ -299,7 +340,8 @@ static int
 io_loop()
 {
   int rv;
-  while (num_pfd)
+  while (!list_empty(&wsc->connection_list))
+  /* while (num_pfd) */
     {
       rv=poll(pfd, num_pfd, 5000);
       if (0<rv)
