@@ -12,18 +12,26 @@ AC_CONFIG_FILES([
  test/Makefile
 ])
 
+AC_CANONICAL_HOST
+
+case "$host_os" in
+     linux*)
+	AC_DEFINE([SYS_LINUX], [1], [Host operating system])
+	;;
+esac
+
 # Checks for programs.
 AC_PROG_CC
 AC_PROG_LN_S
 AC_PROG_RANLIB
+AM_PROG_AR
 
 # Checks for libraries.
-# FIXME: Replace `main' with a function in `-lchatterbox':
-AC_CHECK_LIB([chatterbox], [main])
+AC_CHECK_LIB([chatterbox], [chatterbox_on_frame])
 AC_CHECK_LIB([ssl], [BIO_f_base64])
 
 # Checks for header files.
-AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netinet/in.h stddef.h stdlib.h string.h sys/socket.h sys/time.h syslog.h unistd.h])
+AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netinet/in.h stddef.h stdlib.h string.h sys/socket.h sys/time.h syslog.h unistd.h endian.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_INLINE
