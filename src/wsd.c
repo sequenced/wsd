@@ -1,3 +1,4 @@
+#include "config.h"
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -182,8 +183,18 @@ static int
 open_socket(int p)
 {
   int s;
-  if (0>(s=socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0)))
+#ifdef SYS_LINUX
+  s=socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
+#else
+  s=socket(AF_INET, SOCK_STREAM, 0);
+#endif
+
+  if (s<0)
     return -1;
+
+#ifndef SYS_LINUX
+  /* TODO set non-blocking */
+#endif  
 
   struct sockaddr_in addr;
   memset(&addr, 0x0, sizeof(addr));

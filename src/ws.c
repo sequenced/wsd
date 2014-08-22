@@ -1,8 +1,13 @@
+#include "config.h"
 #include <string.h>
 #include <poll.h>
 #include <stdlib.h>
 #include <assert.h>
+#ifdef HAVE_ENDIAN_H
 #include <endian.h>
+#else
+/* TODO */
+#endif
 #include <sys/types.h>
 #include <openssl/sha.h>
 #include <openssl/bio.h>
