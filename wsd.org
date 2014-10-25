@@ -1,0 +1,13 @@
+
+* TODO create JSON-encoded (JEN) protocol
+  
+| type | purpose                                   |
+|------+-------------------------------------------|
+| get  | get all data associated with a descriptor |
+| set  | set data for a descriptor                 |
+
+* TODO write JEN protocl handler with shared-memory endpoint
+** io_loop needs to be aware of shared-memory descriptors
+
+
+
