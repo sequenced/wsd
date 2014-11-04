@@ -1,7 +1,8 @@
 TESTS = $(check_PROGRAMS)
-check_PROGRAMS = test1 test2 test3 test4 test5
+check_PROGRAMS = test1 test2 test3 test4 test5 test6
 test1_LDADD = ../src/libtestcommon.a
 test2_LDADD = ../src/libtestcommon.a
 test3_LDADD = ../src/libtestcommon.a
 test4_LDADD = ../src/libtestcommon.a
 test5_LDADD = ../src/libtestcommon.a
+test6_LDADD = ../src/libtestcommon.a
