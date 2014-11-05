@@ -186,12 +186,16 @@ ws_on_handshake(wsconn_t *conn, http_req_t *hr)
         return -1;
     }
 
-  /* switch into websocket mode */
+  /* "switch" into websocket mode */
   conn->on_read=ws_on_read;
   conn->on_write=ws_on_write;
+
   /* hook up protocol handlers */
   conn->on_data_frame=loc->on_data_frame;
   conn->on_close=loc->on_close;
+
+  /* link connection with the location it serves */
+  conn->location=loc;
 
   /* application protocol can reject */
   if (0>loc->on_open(conn))

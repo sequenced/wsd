@@ -1,7 +1,7 @@
 #ifndef __CHATTERBOX_H__
 #define __CHATTERBOX_H__
 
-#include "wsapp.h"
+#include "ws_interface.h"
 #include "list.h"
 
 int chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);

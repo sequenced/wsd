@@ -82,6 +82,7 @@ conn_free(int slot)
       conn[slot].on_close=conn[slot+1].on_close;
       conn[slot].close_on_write=conn[slot+1].close_on_write;
       conn[slot].closing=conn[slot+1].closing;
+      conn[slot].location=conn[slot+1].location;
     }
 
   conn[slot].on_read=NULL;
@@ -93,6 +94,7 @@ conn_free(int slot)
   buf_clear(conn[slot].buf_out);
   conn[slot].close_on_write=0;
   conn[slot].closing=0;
+  conn[slot].location=NULL;
 
   return 0;
 }

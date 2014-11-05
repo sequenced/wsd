@@ -46,10 +46,11 @@ struct wsconn
   void (*on_close)(struct wsconn *conn);
   int close_on_write;
   int closing;
+  struct location_config *location;
 };
 typedef struct wsconn wsconn_t;
 
-typedef struct
+struct location_config
 {
   struct list_head list_head;
   char *url;
@@ -57,7 +58,8 @@ typedef struct
   int (*on_data_frame)(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
   int (*on_open)(wsconn_t *conn);
   void (*on_close)(wsconn_t *conn);
-} location_config_t;
+};
+typedef struct  location_config location_config_t;
 
 typedef struct
 {
