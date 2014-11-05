@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include "chatterbox.h"
 
-chatterbox_t box;
+static chatterbox_t box;
 
 int
 chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
