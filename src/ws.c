@@ -198,7 +198,7 @@ ws_on_handshake(wsconn_t *conn, http_req_t *hr)
   conn->location=loc;
 
   /* application protocol can reject */
-  if (0>loc->on_open(conn))
+  if (0>loc->on_open(wsd_cfg, conn))
     goto bad;
 
   goto ok;
