@@ -5,7 +5,7 @@
 #include "list.h"
 
 int chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
-int chatterbox_on_open(wsconn_t *conn);
+int chatterbox_on_open(const wsd_config_t *cfg, wsconn_t *conn);
 void chatterbox_on_close(wsconn_t *conn);
 
 typedef struct

@@ -5,6 +5,7 @@
 #include "chatterbox.h"
 
 static chatterbox_t box;
+static const wsd_config_t *wsd_cfg;
 
 int
 chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
@@ -50,12 +51,13 @@ chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 }
 
 int
-chatterbox_on_open(wsconn_t *conn)
+chatterbox_on_open(const wsd_config_t *cfg, wsconn_t *conn)
 {
   static char once=1;
 
   if (once)
     {
+      wsd_cfg=cfg;
       init_list_head(&box.chat_list);
       once=0;
     }

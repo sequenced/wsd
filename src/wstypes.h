@@ -50,17 +50,6 @@ struct wsconn
 };
 typedef struct wsconn wsconn_t;
 
-struct location_config
-{
-  struct list_head list_head;
-  char *url;
-  char *protocol;
-  int (*on_data_frame)(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
-  int (*on_open)(wsconn_t *conn);
-  void (*on_close)(wsconn_t *conn);
-};
-typedef struct  location_config location_config_t;
-
 typedef struct
 {
   uid_t uid;
@@ -73,6 +62,17 @@ typedef struct
   struct list_head list_head;
   struct list_head location_list;
 } wsd_config_t;
+
+struct location_config
+{
+  struct list_head list_head;
+  char *url;
+  char *protocol;
+  int (*on_data_frame)(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
+  int (*on_open)(const wsd_config_t *wsd_cfg, wsconn_t *conn);
+  void (*on_close)(wsconn_t *conn);
+};
+typedef struct location_config location_config_t;
 
 /* as per RFC2616 section 5.1 */
 typedef struct

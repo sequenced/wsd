@@ -12,7 +12,7 @@ jen_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 }
 
 int
-jen_on_open(wsconn_t *conn)
+jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
 {
   if (0>(md=ssys_shmem_open(conn->location->url,
                             SSYS_SHMEM_FLAG_WRITE|SSYS_SHMEM_FLAG_CREATE,

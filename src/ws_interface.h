@@ -5,8 +5,6 @@
 #include "ws.h"
 #include "wstypes.h"
 
-extern wsd_config_t *wsd_cfg;
-
 #define wsapp_set_fin_bit(byte) (byte|=0x80)
 #define wsapp_set_opcode(byte, val) (byte|=(0xf&val))
 #define wsapp_set_payload_bits(byte, val) (byte|=(0x7f&val))
