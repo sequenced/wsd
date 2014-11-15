@@ -5,6 +5,11 @@ AC_PREREQ([2.67])
 AC_INIT([wsd], [0.9], [bugs@sequencedsystems.com])
 AC_CONFIG_SRCDIR([src/wsd.c])
 AM_INIT_AUTOMAKE([-Wall -Werror])
+AM_PROG_CC_C_O
+
+LT_PREREQ([2.2])
+LT_INIT([dlopen])
+
 AC_CONFIG_HEADERS([src/config.h])
 AC_CONFIG_FILES([
  Makefile
@@ -21,9 +26,7 @@ case "$host_os" in
 esac
 
 # Checks for programs.
-AC_PROG_CC
 AC_PROG_LN_S
-AC_PROG_RANLIB
 
 # Checks for libraries.
 AC_CHECK_LIB([chatterbox], [chatterbox_on_frame])
