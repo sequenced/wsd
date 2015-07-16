@@ -1,6 +1,11 @@
 *.o
+*.lo
+*.la
+*.a
 .dep
 *~
 wsd
 test[0-9]
 TAGS
+Makefile
+Makefile.in
