@@ -93,6 +93,7 @@ main(int argc, char **argv)
   cfg.port=port_arg;
   cfg.verbose=verbose_arg;
   cfg.no_fork=no_fork_arg;
+  cfg.register_user_fd=wschild_register_user_fd;
 
   if (0>fill_in_config_from_file(&cfg, filename_arg))
     exit(1);

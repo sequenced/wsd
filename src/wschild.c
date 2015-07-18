@@ -18,13 +18,17 @@
 #define MAX_DESC 32
 #define MAX_CONN MAX_DESC
 #define BUF_SIZE 8192
+#define DEFAULT_QUANTUM (1<<8)
 
 #define log_addr(msg, addr, fd, slot)                                   \
   printf(msg, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), fd, slot);
 
 static int num_pfd=0;
+static int num_spfd=0;
 static struct pollfd pfd[MAX_DESC];
+static struct pollfd spfd[MAX_DESC];
 static wsconn_t conn[MAX_CONN];
+static wsconn_t sconn[MAX_CONN];
 
 const wsd_config_t *wsd_cfg=NULL;
 
@@ -37,21 +41,38 @@ static int io_loop();
 static void sighup(int sig);
 static void free_conn_and_pfd(const int slot);
 
+#define ws_conn_init() (conn_init(conn))
+#define sshmem_conn_init() (conn_init(sconn))
 static inline int
-conn_init()
+conn_init(wsconn_t array[])
 {
-  memset(&conn, 0x0, sizeof(conn));
+  memset(array, 0x0, sizeof(array));
   int i;
   for (i=0; i<MAX_CONN; i++)
-    if (NULL==(conn[i].buf_in=buf_alloc(BUF_SIZE))
-        || NULL==(conn[i].buf_out=buf_alloc(BUF_SIZE)))
+    if (NULL==(array[i].buf_in=buf_alloc(BUF_SIZE))
+        || NULL==(array[i].buf_out=buf_alloc(BUF_SIZE)))
       return -1;
 
   return 0;
 }
 
 static inline int
-conn_alloc(int slot, struct pollfd *pfd)
+conn_alloc_sshmem(int slot,
+                  struct pollfd *pfd,
+                  int (*on_read)(struct wsconn *conn),
+                  int (*on_write)(struct wsconn *conn))
+{
+  if (slot>=MAX_CONN)
+    return -1;
+
+  sconn[slot].pfd=pfd;
+  sconn[slot].on_read=on_read;
+  sconn[slot].on_write=on_write;
+  return 0;
+}
+
+static inline int
+conn_alloc_http(int slot, struct pollfd *pfd)
 {
   if (slot>=MAX_CONN)
     return -1;
@@ -100,14 +121,20 @@ conn_free(int slot)
 }
 
 #define pfd_get(slot) (pfd[slot])
+#define spfd_get(slot) (spfd[slot])
 
+#define pfd_init() (fd_init(pfd))
+#define spfd_init() (fd_init(spfd))
 static inline void
-pfd_init()
+fd_init(struct pollfd *fd)
 {
-  memset(&pfd, 0x0, sizeof(pfd));
+  memset(fd, 0x0, sizeof(struct pollfd));
   int i;
   for (i=0; i<MAX_DESC; i++)
-    pfd[i].fd=UNASSIGNED;
+    {
+      fd->fd=UNASSIGNED;
+      fd++;
+    }
 }
 
 static inline int
@@ -130,25 +157,34 @@ pfd_free(int slot)
   return 0;
 }
 
+#define pfd_alloc(slot, fd, events)             \
+  (fd_alloc(pfd, &num_pfd, slot, fd, events))
+#define spfd_alloc(slot, fd, events)            \
+  (fd_alloc(spfd, &num_spfd, slot, fd, events))
 static inline int
-pfd_alloc(int slot, int fd, short events)
+fd_alloc(struct pollfd array[], int *num, int slot, int fd, short events)
 {
   if (slot>=MAX_DESC)
     return -1;
 
-  pfd[slot].fd=fd;
-  pfd[slot].events=events;
-  num_pfd++;
+  array[slot].fd=fd;
+  array[slot].events=events;
+  (*num)++;
   return 0;
 }
 
+#define pfd_find_free_slot() (fd_find_free_slot(pfd))
+#define spfd_find_free_slot() (fd_find_free_slot(spfd))
 static inline int
-pfd_find_free_slot()
+fd_find_free_slot(struct pollfd *fd)
 {
   int i=0;
   while (i<MAX_DESC
-         && pfd[i].fd>=0)
-    i++;
+         && fd->fd>=0)
+    {
+      i++;
+      fd++;
+    }
 
   return (i==MAX_DESC?-1:i);
 }
@@ -168,16 +204,24 @@ wschild_main(const wsd_config_t *cfg)
     }
 
   pfd_init();
-  if (0>conn_init())
+  spfd_init();
+
+  if (0>ws_conn_init())
     {
-      perror("conn_init");
+      perror("ws_conn_init");
+      exit(1);
+    }
+
+  if (0>sshmem_conn_init())
+    {
+      perror("sshmem_conn_init");
       exit(1);
     }
 
   int slot;
   slot=pfd_find_free_slot();
   pfd_alloc(slot, wsd_cfg->sock, POLLIN);
-  conn_alloc(slot, &pfd_get(slot));
+  conn_alloc_http(slot, &pfd_get(slot));
 
   struct sigaction act;
   memset(&act, 0x0, sizeof(struct sigaction));
@@ -209,13 +253,13 @@ on_accept(int fd)
     {
       close(s);
       if (wsd_cfg->verbose)
-        log_addr("on_accept: %s:%d: fd=%d: slot=%d: no fee slot, closing\n",
+        log_addr("on_accept: %s:%d: fd=%d: slot=%d: no free slot, closing\n",
                  cl, s, slot);
     }
   else
     {
       pfd_alloc(slot, s, POLLIN);
-      conn_alloc(slot, &pfd_get(slot));
+      conn_alloc_http(slot, &pfd_get(slot));
       if (wsd_cfg->verbose)
         log_addr("on_accept: %s:%d: fd=%d: slot=%d\n", cl, s, slot);
     }
@@ -298,72 +342,141 @@ on_read(wsconn_t *conn)
 }
 
 static int
-io_loop()
+handle_kernel_event(int num_sel)
 {
   int rv;
-  while (num_pfd)
+  int i;
+  for (i=0; i<MAX_DESC; i++)
     {
-      rv=poll(pfd, num_pfd, 5000);
-      if (0<rv)
+      if (POLLIN&pfd[i].revents)
         {
-          int num_sel=rv;
-          int i;
-          for (i=0; i<MAX_DESC; i++)
+          /* server socket: only ever accept */
+          if (pfd[i].fd==wsd_cfg->sock)
             {
-              if (POLLIN&pfd[i].revents)
+              rv=on_accept(pfd[i].fd);
+              if (0>rv)
                 {
-                  /* server socket: only ever accept */
-                  if (pfd[i].fd==wsd_cfg->sock)
-                    {
-                      rv=on_accept(pfd[i].fd);
-                      if (0>rv)
-                        {
-                          perror("on_accept");
-                          free_conn_and_pfd(i);
-                        }
-                    }
-                  else
-                    {
-                      rv=on_read(&conn[i]);
-                      if (0>=rv)
-                        {
-                          if (rv>0)
-                            perror("on_read");
-
-                          on_close(&conn[i]);
-                          free_conn_and_pfd(i);
-                        }
-                    }
+                  perror("on_accept");
+                  free_conn_and_pfd(i);
                 }
-
-              if (POLLOUT&pfd[i].revents)
+            }
+          else
+            {
+              rv=on_read(&conn[i]);
+              if (0>=rv)
                 {
-                  rv=on_write(&conn[i]);
-                  if (0>=rv)
-                    {
-                      if (rv>0)
-                        perror("on_write");
+                  if (rv>0)
+                    perror("on_read");
 
-                      on_close(&conn[i]);
-                      free_conn_and_pfd(i);
-                    }
-                }
-
-              if ((POLLHUP|POLLERR)&pfd[i].revents)
-                {
                   on_close(&conn[i]);
                   free_conn_and_pfd(i);
                 }
-
-              if (0!=pfd[i].revents)
-                num_sel--;
-              if (!num_sel)
-                break;
             }
         }
+
+      if (POLLOUT&pfd[i].revents)
+        {
+          rv=on_write(&conn[i]);
+          if (0>=rv)
+            {
+              if (rv>0)
+                perror("on_write");
+
+              on_close(&conn[i]);
+              free_conn_and_pfd(i);
+            }
+        }
+
+      if ((POLLHUP|POLLERR)&pfd[i].revents)
+        {
+          on_close(&conn[i]);
+          free_conn_and_pfd(i);
+        }
+
+      if (0!=pfd[i].revents)
+        num_sel--;
+      if (!num_sel)
+        break;
     }
 
   return 0;
+}
+
+static int
+handle_user_event(int num_sel)
+{
+  int rv;
+  int i;
+  for (i=0; i<MAX_DESC; i++)
+    {
+      if (POLLIN&spfd[i].revents)
+        {
+          rv=sconn[i].on_read(&sconn[i]);
+          if (0>=rv)
+            {
+              if (0>rv)
+                perror("on_read");
+
+              /* TODO close connection after bad read */
+            }
+        }
+
+      if (POLLOUT&spfd[i].revents)
+        {
+          rv=sconn[i].on_write(&sconn[i]);
+          if (0>=rv)
+            {
+              if (rv>0)
+                perror("on_write");
+
+              /* ditto */
+            }
+        }
+
+      if ((POLLERR)&spfd[i].revents)
+        {
+          /*on_close(&conn[i]);
+            free_conn_and_pfd(i);*/
+        }
+
+      if (0!=spfd[i].revents)
+        num_sel--;
+      if (!num_sel)
+        break;
+    }
+
+  return 0;
+}
+
+static int
+io_loop()
+{
+  int quantum = DEFAULT_QUANTUM;
+  int rv;
+  while (num_pfd)
+    {
+      rv=poll(pfd, num_pfd, quantum);
+      if (rv<0)
+        {
+          perror("poll");
+          break;
+        }
+
+      if (0<rv)
+        handle_kernel_event(rv);
+
+      rv=ssys_shmem_poll(spfd, num_spfd, quantum);
+      if (rv<0)
+        {
+          perror("shmem_poll");
+          break;
+        }
+
+      if (0<rv)
+        handle_user_event(rv);
+    }
+
+  return rv;
 }
 
 static void
@@ -393,12 +506,27 @@ free_conn_and_pfd(const int slot)
   conn_free(slot);
 }
 
-static
-void on_close(wsconn_t *conn)
+static void
+on_close(wsconn_t *conn)
 {
   if (wsd_cfg->verbose)
     printf("on_close: fd=%d\n", conn->pfd->fd);
 
   if (conn->on_close)
     conn->on_close(conn);
+}
+
+int
+wschild_register_user_fd(int fd,
+                         int (*on_read)(struct wsconn *conn),
+                         int (*on_write)(struct wsconn *conn))
+{
+  int slot=spfd_find_free_slot();
+  if (slot<0)
+    return slot;
+
+  spfd_alloc(slot, fd, POLLIN);
+  conn_alloc_sshmem(slot, &spfd_get(slot), on_read, on_write);
+
+  return 0;
 }
