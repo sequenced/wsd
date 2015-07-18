@@ -4,8 +4,10 @@
 *.a
 .dep
 *~
+*.in
+*.guess
+*.sub
 wsd
 test[0-9]
 TAGS
 Makefile
-Makefile.in
