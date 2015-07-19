@@ -519,13 +519,14 @@ on_close(wsconn_t *conn)
 int
 wschild_register_user_fd(int fd,
                          int (*on_read)(struct wsconn *conn),
-                         int (*on_write)(struct wsconn *conn))
+                         int (*on_write)(struct wsconn *conn),
+                         short events)
 {
   int slot=spfd_find_free_slot();
   if (slot<0)
     return slot;
 
-  spfd_alloc(slot, fd, POLLIN);
+  spfd_alloc(slot, fd, events);
   conn_alloc_sshmem(slot, &spfd_get(slot), on_read, on_write);
 
   return 0;
