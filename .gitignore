@@ -7,6 +7,8 @@
 *.in
 *.guess
 *.sub
+*.log
+*.trs
 wsd
 test[0-9]
 TAGS
