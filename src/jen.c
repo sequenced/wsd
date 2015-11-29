@@ -31,7 +31,7 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
   buf_flip(path);
 
   md_in=ssys_shmem_open(buf_ref(path),
-                        SSYS_SHMEM_FLAG_WRITE,
+                        SSYS_SHMEM_FLAG_WRITE|SSYS_SHMEM_FLAG_CREATE,
                         SSYS_SHMEM_MODE_PIPE);
   buf_free(path);
   path=0;
@@ -50,7 +50,7 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
   buf_flip(path);
 
   md_out=ssys_shmem_open(buf_ref(path),
-                         SSYS_SHMEM_FLAG_READ,
+                         SSYS_SHMEM_FLAG_READ|SSYS_SHMEM_FLAG_CREATE,
                          SSYS_SHMEM_MODE_PIPE);
   buf_free(path);
   path=0;
