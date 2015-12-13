@@ -61,7 +61,8 @@ typedef struct
   int no_fork;
   int (*register_user_fd)(int fd,
                           int (*on_read)(struct wsconn *conn),
-                          int (*on_write)(struct wsconn *conn));
+                          int (*on_write)(struct wsconn *conn),
+                          short events);
   struct list_head list_head;
   struct list_head location_list;
 } wsd_config_t;

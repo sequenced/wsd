@@ -69,7 +69,10 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
   /*   rv= */
 
   /* TODO: free shmem ring when registration fails */
-  return wsd_cfg->register_user_fd(md_out, jen_on_shmem_read, POLLIN);
+  return wsd_cfg->register_user_fd(md_out,
+                                   jen_on_shmem_read,
+                                   jen_on_shmem_write,
+                                   POLLIN);
 }
 
 void
@@ -95,7 +98,7 @@ jen_on_shmem_read(wsconn_t *conn)
 {
   int len;
   buf_clear(conn->buf_in);
- again:
+
   if (0>(len=ssys_shmem_read(conn->pfd->fd,
                              buf_ref(conn->buf_in),
                              buf_len(conn->buf_in))))
@@ -105,12 +108,18 @@ jen_on_shmem_read(wsconn_t *conn)
           perror("ssys_shmem_read");
           return (-1);
         }
-
-      goto again;
     }
 
   if (0==len)
     return 0;
+
+  /* jen protocol exchanges null-terminated strings: find null byte */
+  int j=0;
+  char *s=buf_ref(conn->buf_in);
+  while (*s++ != '\0')
+    j++;
+
+  len=j;
 
   buf_fwd(conn->buf_in, len);
   buf_flip(conn->buf_in);
