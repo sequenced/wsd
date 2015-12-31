@@ -63,6 +63,7 @@ typedef struct
                           int (*on_read)(struct wsconn *conn),
                           int (*on_write)(struct wsconn *conn),
                           short events);
+  struct wsconn* (*lookup_kernel_fd)(int fd);
   struct list_head list_head;
   struct list_head location_list;
 } wsd_config_t;
@@ -105,6 +106,7 @@ void buf_clear(buf_t *b);
 void buf_rwnd(buf_t *b, int len);
 void buf_fwd(buf_t *b, int len);
 void buf_put(buf_t *b, char c);
+void buf_put_buf(buf_t *dst, buf_t *src);
 char buf_get(buf_t *b);
 char buf_safe_get(buf_t *b);
 unsigned short buf_get_short(buf_t *b);

@@ -1,19 +1,42 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 #include "jen.h"
 
-static int md_in=-1;
-static int md_out=-1;
-static const wsconn_t *extconn;
+#define UNASSIGNED (-1)
+#define JEN_BUF_SIZE 512
+
+static int md_in=UNASSIGNED;
+static int md_out=UNASSIGNED;
+static int md_ref_count=0;
+static buf_t *scratch=NULL;
 static const wsd_config_t *wsd_cfg;
 static const char *inbound = "-inbound";
 static const char *outbound = "-outbound";
 
+static void close_if_open();
+
+/*
+ * JSON rpc frame layout:
+ *
+ * 0th byte           8th byte          ...
+ * +------------------+------------------+
+ * | sender reference | JSON rpc payload |
+ * +------------------+------------------+
+ *
+ */
+
 int
 jen_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 {
-  if (0>ssys_shmem_write(md_in, buf_ref(in), buf_len(in)))
+  buf_clear(scratch);
+  /* TODO Make hop ref id unique. */
+  buf_put_long(scratch, (unsigned long long)conn->pfd->fd);
+  buf_put_buf(scratch, in);
+  buf_flip(scratch);
+
+  if (0 > ssys_shmem_write(md_in, buf_ref(scratch), buf_len(scratch)))
     perror("ssys_shmem_write");
 
   return 0;
@@ -22,6 +45,17 @@ jen_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 int
 jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
 {
+  if (0 < md_ref_count)
+    {
+      md_ref_count++;
+      return md_ref_count;
+    }
+
+  assert(scratch == NULL);
+  scratch=buf_alloc(JEN_BUF_SIZE);
+  if (!scratch)
+    return (-1);
+
   buf_t *path=buf_alloc(strlen(conn->location->url)+strlen(inbound)+1);
   if (!path)
     return (-1);
@@ -30,14 +64,16 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
   buf_put_string(path, inbound);
   buf_flip(path);
 
+  assert(md_in == UNASSIGNED);
   md_in=ssys_shmem_open(buf_ref(path),
                         SSYS_SHMEM_FLAG_WRITE|SSYS_SHMEM_FLAG_CREATE,
                         SSYS_SHMEM_MODE_PIPE);
   buf_free(path);
   path=0;
-  if (0>md_in)
+  if (0 > md_in)
     {
       perror("ssys_shmem_open");
+      md_in=UNASSIGNED;
       return (-1);
     }
 
@@ -49,69 +85,97 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
   buf_put_string(path, outbound);
   buf_flip(path);
 
+  assert(md_out == UNASSIGNED);
   md_out=ssys_shmem_open(buf_ref(path),
                          SSYS_SHMEM_FLAG_READ|SSYS_SHMEM_FLAG_CREATE,
                          SSYS_SHMEM_MODE_PIPE);
   buf_free(path);
   path=0;
-  if (0>md_out)
+  if (0 > md_out)
     {
       perror("ssys_shmem_open");
+      md_out=UNASSIGNED;
+      close_if_open();
       return (-1);
     }
 
   wsd_cfg=cfg;
-  extconn=conn;
 
-  /* int rv; */
-  /* rv=wsd_cfg->register_user_fd(md_in, 0, jen_on_shmem_write, (short)0); */
-  /* if (0==rv) */
-  /*   rv= */
+  int rv;
+  rv=wsd_cfg->register_user_fd(md_out,
+                               jen_on_shmem_read,
+                               jen_on_shmem_write,
+                               POLLIN);
+  if (0 > rv)
+    {
+      perror("register_user_fd");
+      close_if_open();
+      return (-1);
+    }
 
-  /* TODO: free shmem ring when registration fails */
-  return wsd_cfg->register_user_fd(md_out,
-                                   jen_on_shmem_read,
-                                   jen_on_shmem_write,
-                                   POLLIN);
+  md_ref_count++;
+  return 0;
 }
 
 void
-jen_on_close(wsconn_t *conn)
+jen_on_close(wsconn_t *ignored)
 {
-  if (md_in>=0)
+  if (0 < md_ref_count)
+    md_ref_count--;
+
+  if (0 == md_ref_count)
+    close_if_open();
+}
+
+static void
+close_if_open()
+{
+  if (md_in != UNASSIGNED)
     {
-      if (0>ssys_shmem_close(md_in))
+      if (0 > ssys_shmem_close(md_in))
         perror("ssys_shmem_close");
-      md_in=(-1);
+      md_in=UNASSIGNED;
     }
 
-  if (md_out>=0)
+  if (md_out != UNASSIGNED)
     {
-      if (0>ssys_shmem_close(md_out))
+      if (0 > ssys_shmem_close(md_out))
         perror("ssys_shmem_close");
-      md_out=(-1);
+      md_out=UNASSIGNED;
+    }
+
+  if (scratch)
+    {
+      buf_free(scratch);
+      scratch=NULL;
     }
 }
 
 int
 jen_on_shmem_read(wsconn_t *conn)
 {
-  int len;
   buf_clear(conn->buf_in);
 
-  if (0>(len=ssys_shmem_read(conn->pfd->fd,
-                             buf_ref(conn->buf_in),
-                             buf_len(conn->buf_in))))
-    {
-      if (EAGAIN!=errno)
-        {
-          perror("ssys_shmem_read");
-          return (-1);
-        }
-    }
+  int len;
+  len=ssys_shmem_read(conn->pfd->fd,
+                      buf_ref(conn->buf_in),
+                      buf_len(conn->buf_in));
 
-  if (0==len)
+  if (0 > len)
+    return (-1);
+
+  if (0 == len)
     return 0;
+
+  buf_flip(conn->buf_in);
+
+  int fd;
+  fd=(int)buf_get_long(conn->buf_in);
+
+  wsconn_t *dst;
+  dst=wsd_cfg->lookup_kernel_fd(fd);
+  if (!dst)
+    return (-1);
 
   /* jen protocol exchanges null-terminated strings: find null byte */
   int j=0;
@@ -146,7 +210,7 @@ jen_on_shmem_read(wsconn_t *conn)
       return 0;
     }
 
-  if (buf_len(extconn->buf_out)<frame_len)
+  if (buf_len(dst->buf_out)<frame_len)
     {
       if (LOG_VVVERBOSE<=wsd_cfg->verbose)
         printf("jen: fd=%d: output buffer too small, discarding data\n",
@@ -158,13 +222,13 @@ jen_on_shmem_read(wsconn_t *conn)
   char byte1=0;
   wsapp_set_fin_bit(byte1);
   wsapp_set_opcode(byte1, WS_TEXT_FRAME);
-  buf_put(extconn->buf_out, byte1);
-  wsapp_set_payload_len(extconn->buf_out, len);
+  buf_put(dst->buf_out, byte1);
+  wsapp_set_payload_len(dst->buf_out, len);
 
   while (0<buf_len(conn->buf_in))
-    buf_put(extconn->buf_out, buf_get(conn->buf_in));
+    buf_put(dst->buf_out, buf_get(conn->buf_in));
 
-  extconn->pfd->events|=POLLOUT;
+  dst->pfd->events|=POLLOUT;
 
   return 1;
 }

@@ -531,3 +531,16 @@ wschild_register_user_fd(int fd,
 
   return 0;
 }
+
+struct wsconn*
+lookup_kernel_fd(int fd)
+{
+  int i;
+  for (i=0; i < MAX_CONN; i++)
+    {
+      if (conn[i].pfd->fd == fd)
+        return &conn[i];
+    }
+
+  return NULL;
+}
