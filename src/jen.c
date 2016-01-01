@@ -167,8 +167,7 @@ jen_on_shmem_read(wsconn_t *conn)
   if (0 == len)
     return 0;
 
-  buf_flip(conn->buf_in);
-
+  /* TODO Clean-up hacky access of first eight bytes. */
   int fd;
   fd=(int)buf_get_long(conn->buf_in);
 
@@ -187,6 +186,7 @@ jen_on_shmem_read(wsconn_t *conn)
 
   buf_fwd(conn->buf_in, len);
   buf_flip(conn->buf_in);
+  buf_get_long(conn->buf_in); /* TODO Make repetitive read unnecessary. */
 
   if (LOG_VVVERBOSE<=wsd_cfg->verbose)
     {
