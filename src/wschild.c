@@ -199,7 +199,7 @@ wschild_main(const wsd_config_t *cfg)
 
   if (0>listen(wsd_cfg->sock, 5))
     {
-      perror("listen");
+      perror("wschild: listen");
       exit(1);
     }
 
@@ -208,13 +208,13 @@ wschild_main(const wsd_config_t *cfg)
 
   if (0>ws_conn_init())
     {
-      perror("ws_conn_init");
+      perror("wschild: ws_conn_init");
       exit(1);
     }
 
   if (0>sshmem_conn_init())
     {
-      perror("sshmem_conn_init");
+      perror("wschild: sshmem_conn_init");
       exit(1);
     }
 
@@ -228,7 +228,7 @@ wschild_main(const wsd_config_t *cfg)
   act.sa_handler=sighup;
   if (0>sigaction(SIGHUP, &act, NULL))
     {
-      perror("sigaction");
+      perror("wschild: sigaction");
       exit(1);
     }
 
@@ -253,15 +253,17 @@ on_accept(int fd)
     {
       close(s);
       if (wsd_cfg->verbose)
-        log_addr("on_accept: %s:%d: fd=%d: slot=%d: no free slot, closing\n",
-                 cl, s, slot);
+        log_addr("wschild: on_accept: %s:%d: fd=%d: slot=%d: no free slot, closing\n",
+                 cl,
+                 s,
+                 slot);
     }
   else
     {
       pfd_alloc(slot, s, POLLIN);
       conn_alloc_http(slot, &pfd_get(slot));
       if (wsd_cfg->verbose)
-        log_addr("on_accept: %s:%d: fd=%d: slot=%d\n", cl, s, slot);
+        log_addr("wschild: on_accept: %s:%d: fd=%d: slot=%d\n", cl, s, slot);
     }
 
   return 0;
@@ -273,7 +275,7 @@ on_write(wsconn_t *conn)
   buf_flip(conn->buf_out);
 
   if (LOG_VVERBOSE<=wsd_cfg->verbose)
-    printf("on_write: fd=%d: %d byte(s)\n",
+    printf("wschild: on_write: fd=%d: %d byte(s)\n",
            conn->pfd->fd, buf_len(conn->buf_out));
 
   int len;
@@ -305,7 +307,7 @@ on_write(wsconn_t *conn)
       if (conn->close_on_write)
         {
           if (LOG_VVERBOSE<=wsd_cfg->verbose)
-            printf("on_write: fd=%d: close-on-write true and buffer empty\n",
+            printf("wschild: on_write: fd=%d: close-on-write true and buffer empty\n",
                    conn->pfd->fd);
 
           return 0;
@@ -356,7 +358,7 @@ handle_kernel_event(int num_sel)
               rv=on_accept(pfd[i].fd);
               if (0>rv)
                 {
-                  perror("on_accept");
+                  perror("wschild: on_accept");
                   free_conn_and_pfd(i);
                 }
             }
@@ -366,7 +368,7 @@ handle_kernel_event(int num_sel)
               if (0>=rv)
                 {
                   if (rv>0)
-                    perror("on_read");
+                    perror("wschild: on_read");
 
                   on_close(&conn[i]);
                   free_conn_and_pfd(i);
@@ -377,10 +379,12 @@ handle_kernel_event(int num_sel)
       if (POLLOUT&pfd[i].revents)
         {
           rv=on_write(&conn[i]);
-          if (0>=rv)
+          if (0 >= rv)
             {
-              if (rv>0)
-                perror("on_write");
+              if (rv > 0)
+                fprintf(stderr, "wschild: on_write: fd=%d: %s\n",
+                        conn[i].pfd->fd,
+                        sys_errlist[errno]);
 
               on_close(&conn[i]);
               free_conn_and_pfd(i);
@@ -412,10 +416,12 @@ handle_user_event(int num_sel)
       if (POLLIN&spfd[i].revents)
         {
           rv=sconn[i].on_read(&sconn[i]);
-          if (0>=rv)
+          if (0 >= rv)
             {
-              if (0>rv)
-                perror("on_read");
+              if (0 > rv)
+                fprintf(stderr, "wschild: on_read: fd=%d: %s\n",
+                        sconn[i].pfd->fd,
+                        sys_errlist[errno]);
 
               /* TODO close connection after bad read */
             }
@@ -424,10 +430,12 @@ handle_user_event(int num_sel)
       if (POLLOUT&spfd[i].revents)
         {
           rv=sconn[i].on_write(&sconn[i]);
-          if (0>=rv)
+          if (0 >= rv)
             {
-              if (rv>0)
-                perror("on_write");
+              if (rv > 0)
+                fprintf(stderr, "wschild: on_write: fd=%d: %s\n",
+                        sconn[i].pfd->fd,
+                        sys_errlist[errno]);
 
               /* ditto */
             }
@@ -458,7 +466,7 @@ io_loop()
       rv=poll(pfd, num_pfd, quantum);
       if (rv<0)
         {
-          perror("poll");
+          perror("wschild: poll");
           break;
         }
 
@@ -468,7 +476,7 @@ io_loop()
       rv=ssys_shmem_poll(spfd, num_spfd, quantum);
       if (rv<0)
         {
-          perror("shmem_poll");
+          perror("wschild: shmem_poll");
           break;
         }
 
@@ -496,11 +504,13 @@ sighup(int sig)
 static void
 free_conn_and_pfd(const int slot)
 {
-  if (LOG_VVERBOSE<=wsd_cfg->verbose)
-    printf("free_conn_and_pfd: fd=%d: slot=%d\n", pfd_get(slot).fd, slot);
+  if (LOG_VVERBOSE <= wsd_cfg->verbose)
+    printf("wschild: free_conn_and_pfd: fd=%d: slot=%d\n",
+           pfd_get(slot).fd,
+           slot);
 
   if (0>close(pfd_get(slot).fd))
-    perror("close");
+    perror("wschild: close");
 
   pfd_free(slot);
   conn_free(slot);
@@ -510,7 +520,7 @@ static void
 on_close(wsconn_t *conn)
 {
   if (wsd_cfg->verbose)
-    printf("on_close: fd=%d\n", conn->pfd->fd);
+    printf("wschild: on_close: fd=%d\n", conn->pfd->fd);
 
   if (conn->on_close)
     conn->on_close(conn);

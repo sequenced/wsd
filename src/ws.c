@@ -249,8 +249,8 @@ ws_on_read(wsconn_t *conn)
       return 1;
     }
 
-  if (LOG_VVERBOSE<=wsd_cfg->verbose)
-    printf("ws_on_read: fd=%d: frame: 0x%hhx, 0x%hhx, opcode=0x%x, length=%lu\n",
+  if (LOG_VVERBOSE <= wsd_cfg->verbose)
+    printf("ws: on_read: fd=%d: frame: 0x%hhx, 0x%hhx, opcode=0x%x, len=%lu\n",
            conn->pfd->fd,
            wsf.byte1,
            wsf.byte2,
@@ -289,9 +289,10 @@ dispatch(wsconn_t *conn, wsframe_t *wsf)
     rv=conn->on_data_frame(conn, wsf, &slice, conn->buf_out);
   else
     {
-      if (wsd_cfg->verbose)
-        printf("unknown opcode: fd=%d: 0x%x\n",
-               conn->pfd->fd, OPCODE(wsf->byte1));
+      if (LOG_VVVERBOSE <= wsd_cfg->verbose)
+        printf("jen: unknown opcode: fd=%d: 0x%x\n",
+               conn->pfd->fd,
+               OPCODE(wsf->byte1));
 
       /* unknown opcode */
       rv=start_closing_handshake(conn, wsf, WS_1011);
@@ -379,8 +380,10 @@ on_close_frame(wsconn_t *conn, buf_t *b)
   if (WS_FRAME_STATUS_LEN<=buf_len(b))
     status=be16toh(buf_get_short(b));
 
-  if (LOG_VVERBOSE<=wsd_cfg->verbose)
-    printf("on_close_frame: fd=%d: status=%u\n", conn->pfd->fd, status);
+  if (LOG_VVERBOSE <= wsd_cfg->verbose)
+    printf("ws: on_close_frame: fd=%d: status=%u\n",
+           conn->pfd->fd,
+           status);
 
   if (!conn->closing)
     {
@@ -449,9 +452,10 @@ start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status)
   conn->pfd->events|=POLLOUT;
   conn->closing=1;
 
-  if (LOG_VVERBOSE<=wsd_cfg->verbose)
-    printf("starting_closing_handshake: fd=%d: status=%u\n",
-           conn->pfd->fd, status);
+  if (LOG_VVERBOSE <= wsd_cfg->verbose)
+    printf("ws: starting_closing_handshake: fd=%d: status=%u\n",
+           conn->pfd->fd,
+           status);
 
   return 1;
 }

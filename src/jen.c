@@ -36,8 +36,14 @@ jen_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
   buf_put_buf(scratch, in);
   buf_flip(scratch);
 
+  if (LOG_VVERBOSE <= wsd_cfg->verbose)
+    printf("jen: on_frame: fd=%d: src_fd=%d: %d byte(s)\n",
+           md_in,
+           conn->pfd->fd,
+           buf_len(scratch));
+
   if (0 > ssys_shmem_write(md_in, buf_ref(scratch), buf_len(scratch)))
-    perror("ssys_shmem_write");
+    perror("jen: ssys_shmem_write");
 
   return 0;
 }
@@ -46,10 +52,7 @@ int
 jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
 {
   if (0 < md_ref_count)
-    {
-      md_ref_count++;
-      return md_ref_count;
-    }
+    goto finish;
 
   assert(scratch == NULL);
   scratch=buf_alloc(JEN_BUF_SIZE);
@@ -72,7 +75,7 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
   path=0;
   if (0 > md_in)
     {
-      perror("ssys_shmem_open");
+      perror("jen: ssys_shmem_open");
       md_in=UNASSIGNED;
       return (-1);
     }
@@ -93,7 +96,7 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
   path=0;
   if (0 > md_out)
     {
-      perror("ssys_shmem_open");
+      perror("jen: ssys_shmem_open");
       md_out=UNASSIGNED;
       close_if_open();
       return (-1);
@@ -108,20 +111,32 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
                                POLLIN);
   if (0 > rv)
     {
-      perror("register_user_fd");
+      perror("jen: register_user_fd");
       close_if_open();
       return (-1);
     }
 
+ finish:
   md_ref_count++;
-  return 0;
+
+  if (LOG_VVERBOSE <= wsd_cfg->verbose)
+    printf("jen: on_open: fd=%d, md_ref_count: %d\n",
+           conn->pfd->fd,
+           md_ref_count);
+
+  return md_ref_count;
 }
 
 void
-jen_on_close(wsconn_t *ignored)
+jen_on_close(wsconn_t *conn)
 {
   if (0 < md_ref_count)
     md_ref_count--;
+
+  if (LOG_VVERBOSE <= wsd_cfg->verbose)
+    printf("jen: on_close: fd=%d, md_ref_count=%d\n",
+           conn->pfd->fd,
+           md_ref_count);
 
   if (0 == md_ref_count)
     close_if_open();
@@ -133,14 +148,14 @@ close_if_open()
   if (md_in != UNASSIGNED)
     {
       if (0 > ssys_shmem_close(md_in))
-        perror("ssys_shmem_close");
+        perror("jen: ssys_shmem_close");
       md_in=UNASSIGNED;
     }
 
   if (md_out != UNASSIGNED)
     {
       if (0 > ssys_shmem_close(md_out))
-        perror("ssys_shmem_close");
+        perror("jen: ssys_shmem_close");
       md_out=UNASSIGNED;
     }
 
@@ -188,9 +203,14 @@ jen_on_shmem_read(wsconn_t *conn)
   buf_flip(conn->buf_in);
   buf_get_long(conn->buf_in); /* TODO Make repetitive read unnecessary. */
 
-  if (LOG_VVVERBOSE<=wsd_cfg->verbose)
+  if (LOG_VVERBOSE == wsd_cfg->verbose)
+    printf("jen: on_shmem_read: fd=%d: dst_fd=%d: %d byte(s)\n",
+           conn->pfd->fd,
+           dst->pfd->fd,
+           len);
+  else if (LOG_VVVERBOSE == wsd_cfg->verbose)
     {
-      printf("jen: fd=%d: ", conn->pfd->fd);
+      printf("jen: fd=%d: dst_fd=%d: ", conn->pfd->fd, dst->pfd->fd);
       int old=buf_len(conn->buf_in);
 
       while (0<buf_len(conn->buf_in))
@@ -203,7 +223,7 @@ jen_on_shmem_read(wsconn_t *conn)
   long frame_len=wsapp_calculate_frame_length(len);
   if (0>frame_len)
     {
-      if (LOG_VVVERBOSE<=wsd_cfg->verbose)
+      if (LOG_VVVERBOSE <= wsd_cfg->verbose)
         printf("jen: fd=%d: negative frame length, discarding data\n",
                conn->pfd->fd);
 
@@ -212,7 +232,7 @@ jen_on_shmem_read(wsconn_t *conn)
 
   if (buf_len(dst->buf_out)<frame_len)
     {
-      if (LOG_VVVERBOSE<=wsd_cfg->verbose)
+      if (LOG_VVVERBOSE <= wsd_cfg->verbose)
         printf("jen: fd=%d: output buffer too small, discarding data\n",
                conn->pfd->fd);
 

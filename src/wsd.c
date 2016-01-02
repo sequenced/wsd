@@ -107,7 +107,7 @@ main(int argc, char **argv)
     {
       if (0>(pid=fork()))
         {
-          perror("fork");
+          perror("wsd: fork");
           exit(1);
         }
     }
@@ -118,7 +118,7 @@ main(int argc, char **argv)
       /* child */
       if (0>(cfg.sock=open_socket(cfg.port)))
         {
-          perror("open_socket");
+          perror("wsd: open_socket");
           exit(1);
         }
 
@@ -145,14 +145,14 @@ main(int argc, char **argv)
       act.sa_handler=sighup;
       if (0>sigaction(SIGHUP, &act, NULL))
         {
-          perror("sigaction");
+          perror("wsd: sigaction");
           exit(1);
         }
 
       int status;
       if (0>waitpid(-1, &status, 0))
         {
-          perror("wait");
+          perror("wsd: wait");
           exit(1);
         }
     }
@@ -167,7 +167,7 @@ drop_priv(uid_t new_uid)
 {
   if (0>setuid(new_uid))
     {
-      perror("setuid");
+      perror("wsd: setuid");
       return -1;
     }
 
@@ -215,14 +215,14 @@ fill_in_config_from_file(wsd_config_t *cfg, const char* filename)
   int fd;
   if (0>(fd=open(filename, O_RDONLY)))
     {
-      perror("open");
+      perror("wsd: open");
       return -1;
     }
 
   struct stat sb;
   if (0>fstat(fd, &sb))
     {
-      perror("fstat");
+      perror("wsd: fstat");
       close(fd);
       return -1;
     }
@@ -230,7 +230,7 @@ fill_in_config_from_file(wsd_config_t *cfg, const char* filename)
   buf_t *b;
   if (NULL==(b=buf_alloc(sb.st_size)))
     {
-      perror("buf_alloc");
+      perror("wsd: buf_alloc");
       close(fd);
       return -1;
     }
@@ -239,7 +239,7 @@ fill_in_config_from_file(wsd_config_t *cfg, const char* filename)
   close(fd);
   if (0>len)
     {
-      perror("read");
+      perror("wsd: read");
       buf_free(b);
       return -1;
     }
