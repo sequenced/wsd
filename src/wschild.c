@@ -2,6 +2,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#include <syslog.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -40,6 +41,7 @@ static void on_close(wsconn_t *conn);
 static int io_loop();
 static void sighup(int sig);
 static void free_conn_and_pfd(const int slot);
+static void sigterm(int sig);
 
 #define ws_conn_init() (conn_init(conn))
 #define sshmem_conn_init() (conn_init(sconn))
@@ -197,7 +199,7 @@ wschild_main(const wsd_config_t *cfg)
 {
   wsd_cfg=cfg;
 
-  if (0>listen(wsd_cfg->sock, 5))
+  if (0 > listen(wsd_cfg->sock, 5))
     {
       perror("wschild: listen");
       exit(1);
@@ -225,8 +227,8 @@ wschild_main(const wsd_config_t *cfg)
 
   struct sigaction act;
   memset(&act, 0x0, sizeof(struct sigaction));
-  act.sa_handler=sighup;
-  if (0>sigaction(SIGHUP, &act, NULL))
+  act.sa_handler=sigterm;
+  if (0>sigaction(SIGTERM, &act, NULL))
     {
       perror("wschild: sigaction");
       exit(1);
@@ -384,7 +386,7 @@ handle_kernel_event(int num_sel)
               if (rv > 0)
                 fprintf(stderr, "wschild: on_write: fd=%d: %s\n",
                         conn[i].pfd->fd,
-                        sys_errlist[errno]);
+                        strerror(errno));
 
               on_close(&conn[i]);
               free_conn_and_pfd(i);
@@ -421,7 +423,7 @@ handle_user_event(int num_sel)
               if (0 > rv)
                 fprintf(stderr, "wschild: on_read: fd=%d: %s\n",
                         sconn[i].pfd->fd,
-                        sys_errlist[errno]);
+                        strerror(errno));
 
               /* TODO close connection after bad read */
             }
@@ -435,7 +437,7 @@ handle_user_event(int num_sel)
               if (rv > 0)
                 fprintf(stderr, "wschild: on_write: fd=%d: %s\n",
                         sconn[i].pfd->fd,
-                        sys_errlist[errno]);
+                        strerror(errno));
 
               /* ditto */
             }
@@ -488,17 +490,21 @@ io_loop()
 }
 
 static void
-sighup(int sig)
+sigterm(int sig)
 {
+  int num_use=0;
   int i;
-  for (i=0; i<MAX_DESC; i++)
+  for (i=0; i < MAX_DESC; i++)
     {
       if (pfd_is_in_use(i))
         {
           on_close(&conn[i]);
           free_conn_and_pfd(i);
+          num_use++;
         }
     }
+
+  syslog(LOG_INFO, "caught signal, terminating %d client(s)", num_use);
 }
 
 static void
