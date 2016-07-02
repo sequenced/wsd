@@ -1,5 +1,5 @@
-#ifndef __WSAPP_H__
-#define __WSAPP_H__
+#ifndef __WS_INTERFACE_H__
+#define __WS_INTERFACE_H__
 
 #include <limits.h>
 #include "ws.h"
@@ -18,4 +18,4 @@ long wsapp_calculate_frame_length(const unsigned long payload_len);
 int wsapp_set_payload_len(buf_t *out, const unsigned long payload_len);
 int wsapp_lookup_conn_by_protocol(const char *proto, struct list_head result);
 
-#endif /* #ifndef __WSAPP_H__ */
+#endif /* #ifndef __WS_INTERFACE_H__ */

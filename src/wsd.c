@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
-#include <signal.h>
 #include <string.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -21,7 +20,6 @@
 
 static const char *ident="wsd";
 static int drop_priv(uid_t new_uid);
-static void sighup(int);
 static int open_socket(int p);
 static int fill_in_config_from_file(wsd_config_t *cfg, const char* filename);
 static int resolve_dl_dependencies(struct list_head *parent);
@@ -33,7 +31,7 @@ main(int argc, char **argv)
   int port_arg=3000; /* default */
   int no_fork_arg=0;
   int verbose_arg=0;
-  const char *filename_arg="/etc/wsd.conf"; /* default */
+  const char *filename_arg="/etc/wsd.conf";   /* default */
   const char *host_arg=NULL;
   const char *user_arg=NULL;
 
@@ -61,27 +59,27 @@ main(int argc, char **argv)
           break;
         default:
           /* TODO */
-          fprintf(stderr, "%s: unknown option\n", argv[0]);
+          fprintf(stderr, "wsd: %s: unknown option\n", argv[0]);
           exit(1);
         }
     }
 
-  if (NULL==host_arg)
+  if (NULL == host_arg)
     host_arg="127.0.0.1";
 
-  if (NULL==user_arg)
+  if (NULL == user_arg)
     user_arg="wsd";
 
   struct passwd *pwent;
-  if (NULL==(pwent=getpwnam(user_arg)))
+  if (NULL == (pwent=getpwnam(user_arg)))
     {
-      fprintf(stderr, "unknown user: %s\n", user_arg);
+      fprintf(stderr, "wsd: unknown user: %s\n", user_arg);
       exit(1);
     }
 
-  if (0==pwent->pw_uid)
+  if (0 == pwent->pw_uid)
     {
-      fprintf(stderr, "daemon user can't be root\n");
+      fprintf(stderr, "wsd: daemon user can't be root\n");
       exit(1);
     }
 
@@ -94,35 +92,56 @@ main(int argc, char **argv)
   cfg.verbose=verbose_arg;
   cfg.no_fork=no_fork_arg;
   cfg.register_user_fd=wschild_register_user_fd;
+  cfg.lookup_kernel_fd=wschild_lookup_kernel_fd;
 
-  if (0>fill_in_config_from_file(&cfg, filename_arg))
+  if (0 > fill_in_config_from_file(&cfg, filename_arg))
     exit(1);
-
-  openlog(ident, LOG_PID, LOG_USER);
-  syslog(LOG_INFO, "starting");
 
   pid_t pid=0;
   if (!cfg.no_fork)
     {
-      if (0>(pid=fork()))
+      if (0 > (pid=fork()))
         {
-          perror("fork");
+          perror("wsd: fork");
           exit(1);
         }
     }
 
-  if (0==pid
-      || cfg.no_fork)
+  if (0 == pid || cfg.no_fork)
     {
-      /* child */
-      if (0>(cfg.sock=open_socket(cfg.port)))
+      umask(0);
+
+      openlog(ident, LOG_PID, LOG_USER);
+      syslog(LOG_INFO, "starting");
+
+      if (!cfg.no_fork && 0 > setsid())
         {
-          perror("open_socket");
+          perror("wsd: setsid");
           exit(1);
         }
 
-      if (0==getuid())
-        if (0>drop_priv(cfg.uid))
+      if (0 > chdir("/"))
+        {
+          perror("wsd: chdir");
+          exit(1);
+        }
+
+      if (!cfg.no_fork)
+        {
+          close(STDIN_FILENO);
+          close(STDOUT_FILENO);
+          close(STDERR_FILENO);
+        }
+
+      /* child */
+      if (0 > (cfg.sock=open_socket(cfg.port)))
+        {
+          perror("wsd: open_socket");
+          exit(1);
+        }
+
+      if (0 == getuid())
+        if (0 > drop_priv(cfg.uid))
           {
             close(cfg.sock);
             exit(1);
@@ -131,33 +150,15 @@ main(int argc, char **argv)
       int rv;
       rv=wschild_main(&cfg);
 
-      if (cfg.no_fork)
-        syslog(LOG_INFO, "stopping");
+      syslog(LOG_INFO, "stopped");
+      closelog();
 
       exit(rv);
     }
-  else
-    {
-      /* parent */
-      struct sigaction act;
-      memset(&act, 0x0, sizeof(struct sigaction));
-      act.sa_handler=sighup;
-      if (0>sigaction(SIGHUP, &act, NULL))
-        {
-          perror("sigaction");
-          exit(1);
-        }
 
-      int status;
-      if (0>waitpid(-1, &status, 0))
-        {
-          perror("wait");
-          exit(1);
-        }
-    }
+  _exit(0);
 
-  syslog(LOG_INFO, "stopping");
-
+  /* not reached */
   return 0;
 }
 
@@ -166,18 +167,11 @@ drop_priv(uid_t new_uid)
 {
   if (0>setuid(new_uid))
     {
-      perror("setuid");
+      perror("wsd: setuid");
       return -1;
     }
 
   return 0;
-}
-
-static void
-sighup(int sig)
-{
-  /* signal children if any */
-  kill(0, sig);
 }
 
 static int
@@ -214,14 +208,14 @@ fill_in_config_from_file(wsd_config_t *cfg, const char* filename)
   int fd;
   if (0>(fd=open(filename, O_RDONLY)))
     {
-      perror("open");
+      perror("wsd: open");
       return -1;
     }
 
   struct stat sb;
   if (0>fstat(fd, &sb))
     {
-      perror("fstat");
+      perror("wsd: fstat");
       close(fd);
       return -1;
     }
@@ -229,7 +223,7 @@ fill_in_config_from_file(wsd_config_t *cfg, const char* filename)
   buf_t *b;
   if (NULL==(b=buf_alloc(sb.st_size)))
     {
-      perror("buf_alloc");
+      perror("wsd: buf_alloc");
       close(fd);
       return -1;
     }
@@ -238,7 +232,7 @@ fill_in_config_from_file(wsd_config_t *cfg, const char* filename)
   close(fd);
   if (0>len)
     {
-      perror("read");
+      perror("wsd: read");
       buf_free(b);
       return -1;
     }
@@ -271,7 +265,7 @@ resolve_dl_dependencies(struct list_head *parent)
       void *handle=dlopen(buf, RTLD_NOW);
       if (NULL==handle)
         {
-          fprintf(stderr, "%s\n", dlerror());
+          fprintf(stderr, "wsd: %s\n", dlerror());
           return -1;
         }
 
@@ -280,7 +274,7 @@ resolve_dl_dependencies(struct list_head *parent)
       cursor->on_data_frame=dlsym(handle, buf);
       if (NULL==cursor->on_data_frame)
         {
-          fprintf(stderr, "%s\n", dlerror());
+          fprintf(stderr, "wsd: %s\n", dlerror());
           return -1;
         }
 
@@ -289,7 +283,7 @@ resolve_dl_dependencies(struct list_head *parent)
       cursor->on_open=dlsym(handle, buf);
       if (NULL==cursor->on_open)
         {
-          fprintf(stderr, "%s\n", dlerror());
+          fprintf(stderr, "wsd: %s\n", dlerror());
           return -1;
         }
 
@@ -298,7 +292,7 @@ resolve_dl_dependencies(struct list_head *parent)
       cursor->on_close=dlsym(handle, buf);
       if (NULL==cursor->on_close)
         {
-          fprintf(stderr, "%s\n", dlerror());
+          fprintf(stderr, "wsd: %s\n", dlerror());
           return -1;
         }
 

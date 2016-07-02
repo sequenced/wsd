@@ -295,3 +295,10 @@ hash32_table_hash(int val)
   v^=(v>>16);
   return ((v>>8)^v)&HASH32_TABLE_SIZE;
 }
+
+void
+buf_put_buf(buf_t *dst, buf_t *src)
+{
+  while (buf_len(dst))
+    buf_put(dst, buf_safe_get(src));
+}
