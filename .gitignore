@@ -11,3 +11,13 @@ wsd
 test[0-9]
 TAGS
 Makefile
+aclocal.m4
+ar-lib
+autom4te.cache
+compile
+configure
+depcomp
+install-sh
+ltmain.sh
+missing
+test-driver
