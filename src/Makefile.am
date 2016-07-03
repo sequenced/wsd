@@ -1,6 +1,7 @@
 bin_PROGRAMS = wsd
 wsd_SOURCES = wsd.c config_parser.c http.c ws.c wschild.c wstypes.c
 wsd_CFLAGS = $(AM_CFLAGS)
+wsd_LDFLAGS = -ldl
 noinst_LIBRARIES = libtestcommon.a libwstypes.a
 libwstypes_a_SOURCES = wstypes.c
 libtestcommon_a_SOURCES = http.c ws.c wstypes.c config_parser.c
