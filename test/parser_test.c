@@ -10,13 +10,17 @@
 #include <assert.h>
 #include "parser.h"
 
-char *samples[] = { "safari-9.1.1-varnish-4.1.3-sample" };
+char *samples[] = {
+     "safari-9.1.1-varnish-4.1.3-sample",
+     "firefox-47-varnish-4.1.3-sample",
+     "chrome-51-varnish-4.1.3-sample"
+};
 
 int
 main()
 {
      int fd;
-     for (int i = 0; i < 1; i++) {
+     for (int i = 0; i < 3; i++) {
           if (0 > (fd = open(samples[i], O_RDONLY)))
           {
                fprintf(stderr, "%s, line %d: ", __FILE__, __LINE__);
@@ -52,10 +56,11 @@ main()
           
           if (0 > rv)
           {
-               fprintf(stderr, "%s, line %d: errno=%d\n",
+               fprintf(stderr, "%s, line %d: errno=%d, trial=%d\n",
                        __FILE__,
                        __LINE__,
-                       errno);
+                       errno,
+                       i);
                return 1;
           }
 
