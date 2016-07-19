@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <strings.h>
-#include "wstypes.h"
+#include <errno.h>
 #include "parser.h"
 
 #define EUNEXPECTED_EOS  (-100)
@@ -11,7 +11,6 @@
 
 #define crlf 0x0a0d
 
-static int errno = 0;
 static char *prev = NULL;
 
 static unsigned int
@@ -143,45 +142,4 @@ finish:
      result->len = cur - start - 1; /* excludes crlf */
      
      return result->len;
-}
-
-static int
-print_tok(string_t *t)
-{
-     printf("+++ token=\"");
-     for (int i = 0; i < t->len; i++)
-          printf("%c", *(t->start + i));
-     printf("\", len=%d\n", t->len);
-}
-
-int
-main(int argc, char ** argv)
-{
-     char buf[4096];
-     bzero(buf, 4096);
-
-     read(0, buf, 4095);
-
-     string_t *t = malloc(sizeof(string_t));
-
-     int rv = 0;
-     if (0 < (rv = http_header_tok(buf, t)))
-          print_tok(t);
-     else
-          printf("--- errno=%d\n", errno);
-
-     while (0 < (rv = http_header_tok(NULL, t)))
-     {
-          print_tok(t);
-
-          if (0 == rv)
-               break;
-     }
-
-     if (0 > rv)
-          printf("--- errno=%d\n", errno);
-     else
-          printf("!!! eos: errno=%d, len=%d\n", errno, t->len);
-
-     return rv;
 }
