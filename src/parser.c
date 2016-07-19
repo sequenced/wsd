@@ -55,6 +55,7 @@ is_rfc7230_field_value(char c)
      case ',':
      case '(':
      case ')':
+     case '+':
           break;
      default:
           return 0;
