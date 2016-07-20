@@ -478,9 +478,9 @@ lookup_location(http_req_t *hr)
   location_config_t *rv=0, *cursor;
   list_for_each_entry(cursor, &wsd_cfg->location_list, list_head)
     {
-      if (0==strncasecmp(hr->req_uri.start,
+      if (0==strncasecmp(hr->req_target.start,
                          cursor->url,
-                         hr->req_uri.len))
+                         hr->req_target.len))
         rv=cursor;
     }
 

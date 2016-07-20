@@ -82,6 +82,7 @@ conn_alloc_http(int slot, struct pollfd *pfd)
   conn[slot].pfd=pfd;
   conn[slot].on_read=http_on_read;
   conn[slot].on_write=http_on_write;
+  conn[slot].on_handshake=ws_on_handshake;
   return 0;
 }
 
@@ -102,6 +103,7 @@ conn_free(int slot)
       conn[slot].on_read=conn[slot+1].on_read;
       conn[slot].on_write=conn[slot+1].on_write;
       conn[slot].on_data_frame=conn[slot+1].on_data_frame;
+      conn[slot].on_handshake=conn[slot+1].on_handshake;
       conn[slot].on_close=conn[slot+1].on_close;
       conn[slot].close_on_write=conn[slot+1].close_on_write;
       conn[slot].closing=conn[slot+1].closing;
@@ -111,6 +113,7 @@ conn_free(int slot)
   conn[slot].on_read=NULL;
   conn[slot].on_write=NULL;
   conn[slot].on_data_frame=NULL;
+  conn[slot].on_handshake=NULL;
   conn[slot].on_close=NULL;
   conn[slot].pfd=NULL;
   buf_clear(conn[slot].buf_in);

@@ -13,89 +13,91 @@
 
 typedef struct
 {
-  const char *start;
-  int len;
+     char *start;
+     int len;
 } string_t;
 
 typedef struct
 {
-  char *p;
-  int pos;
-  int capacity;
-  int limit;
-  char swap;
+     char *p;
+     int pos;
+     int capacity;
+     int limit;
+     char swap;
 } buf_t;
+
+/* see RFC7320, section 3 */
+typedef struct
+{
+     string_t method;
+     string_t req_target;
+     string_t http_ver;
+     string_t host;
+     string_t origin;
+     string_t user_agent;
+     string_t conn;
+     string_t conn2;
+     string_t upgrade;
+     string_t sec_ws_key;
+     string_t sec_ws_ver;
+     string_t sec_ws_ext;
+     string_t sec_ws_proto;
+     int is_uri_abs;
+} http_req_t;
 
 typedef struct
 {
-  char byte1;
-  char byte2;
-  unsigned long payload_len;
-  unsigned int masking_key;
+     char byte1;
+     char byte2;
+     unsigned long payload_len;
+     unsigned int masking_key;
 } wsframe_t;
 
 struct wsconn
 {
-  struct pollfd *pfd;
-  buf_t *buf_in;
-  buf_t *buf_out;
-  int (*on_read)(struct wsconn *conn);
-  int (*on_write)(struct wsconn *conn);
-  int (*on_data_frame)(struct wsconn *conn, wsframe_t *wsf, buf_t *in,
-                       buf_t *out);
-  void (*on_close)(struct wsconn *conn);
-  int close_on_write;
-  int closing;
-  struct location_config *location;
+     struct pollfd *pfd;
+     buf_t *buf_in;
+     buf_t *buf_out;
+     int (*on_read)(struct wsconn *conn);
+     int (*on_write)(struct wsconn *conn);
+     int (*on_data_frame)(struct wsconn *conn, wsframe_t *wsf, buf_t *in,
+                          buf_t *out);
+     void (*on_close)(struct wsconn *conn);
+     int (*on_handshake)(struct wsconn *conn, http_req_t *req);
+     int close_on_write;
+     int closing;
+     struct location_config *location;
 };
 typedef struct wsconn wsconn_t;
 
 typedef struct
 {
-  uid_t uid;
-  char *username;
-  char *hostname;
-  int sock;
-  int port;
-  int verbose;
-  int no_fork;
-  int (*register_user_fd)(int fd,
-                          int (*on_read)(struct wsconn *conn),
-                          int (*on_write)(struct wsconn *conn),
-                          short events);
-  struct wsconn* (*lookup_kernel_fd)(int fd);
-  struct list_head list_head;
-  struct list_head location_list;
+     uid_t uid;
+     char *username;
+     char *hostname;
+     int sock;
+     int port;
+     int verbose;
+     int no_fork;
+     int (*register_user_fd)(int fd,
+                             int (*on_read)(struct wsconn *conn),
+                             int (*on_write)(struct wsconn *conn),
+                             short events);
+     struct wsconn* (*lookup_kernel_fd)(int fd);
+     struct list_head list_head;
+     struct list_head location_list;
 } wsd_config_t;
 
 struct location_config
 {
-  struct list_head list_head;
-  char *url;
-  char *protocol;
-  int (*on_data_frame)(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
-  int (*on_open)(const wsd_config_t *wsd_cfg, wsconn_t *conn);
-  void (*on_close)(wsconn_t *conn);
+     struct list_head list_head;
+     char *url;
+     char *protocol;
+     int (*on_data_frame)(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out);
+     int (*on_open)(const wsd_config_t *wsd_cfg, wsconn_t *conn);
+     void (*on_close)(wsconn_t *conn);
 };
 typedef struct location_config location_config_t;
-
-/* as per RFC2616 section 5.1 */
-typedef struct
-{
-  string_t method;
-  string_t req_uri;
-  string_t http_ver;
-  string_t host;
-  string_t origin;
-  string_t user_agent;
-  string_t conn;
-  string_t upgrade;
-  string_t sec_ws_key;
-  string_t sec_ws_ver;
-  string_t sec_ws_ext;
-  string_t sec_ws_proto;
-  int is_uri_abs;
-} http_req_t;
 
 /* trims whitespace from beginning and end of string */
 void trim(string_t *str);
@@ -125,19 +127,19 @@ void buf_slice(buf_t *a, buf_t *b, int len);
 
 typedef struct
 {
-  void *data;
-  int key;
+     void *data;
+     int key;
 } bucket32_t;
 
 typedef struct
 {
-  bucket32_t buckets[HASH_ENTRY_BUCKETS];
+     bucket32_t buckets[HASH_ENTRY_BUCKETS];
 } hash_table_entry32_t;
 
 typedef struct
 {
-  unsigned int (*hash)(int val);
-  hash_table_entry32_t entries[HASH32_TABLE_SIZE];
+     unsigned int (*hash)(int val);
+     hash_table_entry32_t entries[HASH32_TABLE_SIZE];
 } hash32_table_t;
 
 void *hash32_table_lookup(hash32_table_t *t, int key);
