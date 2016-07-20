@@ -184,13 +184,17 @@ open_socket(int p)
      s = socket(AF_INET, SOCK_STREAM, 0);
 #endif
 
-     if (s<0)
-          return -1;
+     if (s < 0)
+          return (-1);
 
 #ifndef SYS_LINUX
      /* TODO set non-blocking */
 #endif  
 
+     int opt = 1;
+     if (0 > setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)))
+          return (-1);
+     
      struct sockaddr_in addr;
      memset(&addr, 0x0, sizeof(addr));
      addr.sin_family = AF_INET;
