@@ -10,6 +10,8 @@
 #include <assert.h>
 #include "parser.h"
 
+#define NUM_SAMPLES 3
+
 char *samples[] = {
      "safari-9.1.1-varnish-4.1.3-sample",
      "firefox-47-varnish-4.1.3-sample",
@@ -20,7 +22,7 @@ int
 main()
 {
      int fd;
-     for (int i = 0; i < 3; i++) {
+     for (int i = 0; i < NUM_SAMPLES; i++) {
           if (0 > (fd = open(samples[i], O_RDONLY)))
           {
                fprintf(stderr, "%s, line %d: ", __FILE__, __LINE__);
