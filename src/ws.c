@@ -88,13 +88,13 @@ prepare_handshake(buf_t *b, http_req_t *hr)
      strcpy(buf_ref(b), HTTP_101);
      buf_fwd(b, len);
 
-     len = WS_ACCEPT_KEY_LEN+2; /* +2: `\r\n' */
+     len = WS_ACCEPT_KEY_LEN + 2; /* +2: `\r\n' */
      if (buf_len(b) < len)
           goto error;
      if (0>generate_accept_val(b, hr))
           goto error;
 
-     len = strlen(WS_VER)+strlen(FLD_SEC_WS_VER_VAL)+2; /* +2 `\r\n' */
+     len = strlen(WS_VER) + strlen(FLD_SEC_WS_VER_VAL) + 2; /* +2 `\r\n' */
      if (buf_len(b) < len)
           goto error;
      strcpy(buf_ref(b), WS_VER);
@@ -106,7 +106,7 @@ prepare_handshake(buf_t *b, http_req_t *hr)
 
      /* TODO for now echo back requested protocol */
      trim(&(hr->sec_ws_proto));
-     len = strlen(WS_PROTO)+hr->sec_ws_proto.len+2; /* +2 `\r\n' */
+     len = strlen(WS_PROTO) + hr->sec_ws_proto.len + 2; /* +2 `\r\n' */
      if (buf_len(b) < len)
           goto error;
      strcpy(buf_ref(b), WS_PROTO);
@@ -138,7 +138,7 @@ generate_accept_val(buf_t *b, http_req_t *hr)
      char scratch[SCRATCH_SIZE];
      memset(scratch, 0x0, SCRATCH_SIZE);
      strncpy(scratch, hr->sec_ws_key.start, hr->sec_ws_key.len);
-     strcpy((char*)(scratch+hr->sec_ws_key.len), WS_GUID);
+     strcpy((char*)(scratch + hr->sec_ws_key.len), WS_GUID);
 
      unsigned char *md = SHA1((unsigned char*)scratch,
                               strlen(scratch),
@@ -152,8 +152,8 @@ generate_accept_val(buf_t *b, http_req_t *hr)
      BIO_write(b64, md, SHA_DIGEST_LENGTH);
      (void)BIO_flush(b64);
      BIO_get_mem_ptr(b64, &p);
-     memcpy(buf_ref(b), p->data, p->length-1);
-     buf_fwd(b, p->length-1);
+     memcpy(buf_ref(b), p->data, p->length - 1);
+     buf_fwd(b, p->length - 1);
 
      BIO_free_all(b64);
 
@@ -180,7 +180,7 @@ ws_on_handshake(wsconn_t *conn, http_req_t *hr)
 
      assert(buf_pos(conn->buf_out) == 0);
 
-     if (0>prepare_handshake(conn->buf_out, hr))
+     if (0 > prepare_handshake(conn->buf_out, hr))
      {
           if (0>http_prepare_response(conn->buf_out, HTTP_500))
                return -1;
@@ -204,8 +204,8 @@ ws_on_handshake(wsconn_t *conn, http_req_t *hr)
      goto ok;
 
 bad:
-     if (0>http_prepare_response(conn->buf_out, HTTP_400))
-          return -1;
+     if (0 > http_prepare_response(conn->buf_out, HTTP_400))
+          return (-1);
 
 ok:
      buf_clear(conn->buf_in);
@@ -354,7 +354,7 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
      }
      else if (wsf->payload_len == 126)
      {
-          if (buf_len(b) < (2+4))
+          if (buf_len(b) < (2 + 4))
                return -1;
 
           wsf->payload_len = be16toh(buf_get_short(b));
@@ -362,7 +362,7 @@ fill_in_wsframe_details(buf_t *b, wsframe_t *wsf)
      }
      else if (wsf->payload_len == 127)
      {
-          if (buf_len(b) < (2+8))
+          if (buf_len(b) < (2 + 8))
                return -1;
 
           wsf->payload_len = be64toh(buf_get_long(b));
