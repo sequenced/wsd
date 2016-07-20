@@ -11,7 +11,7 @@
 #include <assert.h>
 #include <http.h>
 
-#define NUM_SAMPLES 3
+#define NUM_SAMPLES 5
 #define BUF_SIZE 8192
 
 wsd_config_t *wsd_cfg;
@@ -19,7 +19,10 @@ wsd_config_t *wsd_cfg;
 char *samples[] = {
      "safari-9.1.1-varnish-4.1.3-sample",
      "firefox-47-varnish-4.1.3-sample",
-     "chrome-51-varnish-4.1.3-sample"
+     "chrome-51-varnish-4.1.3-sample",
+     "safari-9.1.1-sample",
+     "firefox-47-sample",
+     "chrome-51-sample"
 };
 
 int noop(struct wsconn *conn, http_req_t *req) { return 1; }

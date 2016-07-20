@@ -1,0 +1,13 @@
+GET /uuser1 HTTP/1.1
+Upgrade: websocket
+Connection: Upgrade
+Host: deadlock.michaelgoldschmidt.com:6084
+Origin: http://deadlock.michaelgoldschmidt.com
+Sec-WebSocket-Protocol: jen
+Pragma: no-cache
+Cache-Control: no-cache
+Sec-WebSocket-Key: B9Pc1t39Tqoj+fidr/bzeg==
+Sec-WebSocket-Version: 13
+Sec-WebSocket-Extensions: x-webkit-deflate-frame
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/601.6.17 (KHTML, like Gecko) Version/9.1.1 Safari/601.6.17
+
