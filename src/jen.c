@@ -12,8 +12,8 @@ static int md_out=UNASSIGNED;
 static int md_ref_count=0;
 static buf_t *scratch=NULL;
 static const wsd_config_t *wsd_cfg;
-static const char *inbound = "-inbound";
-static const char *outbound = "-outbound";
+static const char *inbound = "-in";
+static const char *outbound = "-out";
 
 static void close_if_open();
 
