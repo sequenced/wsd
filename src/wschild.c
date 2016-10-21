@@ -27,8 +27,8 @@
      if (!((exp) != 0)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
 #define A(exp)                                                          \
      if (!(exp)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
-#define log_addr(msg, addr, fd)                                         \
-     printf(msg, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), fd);
+#define log_addr(msg, func, addr, fd)                                   \
+     printf(msg, func, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), fd);
 
 const wsd_config_t *wsd_cfg = NULL;
 static int epfd = -1;
