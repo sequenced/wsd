@@ -56,6 +56,9 @@ typedef struct
 struct wsconn
 {
      int fd;
+     int close_on_write;
+     int closing;
+     int write;
      buf_t *buf_in;
      buf_t *buf_out;
      int (*on_read)(struct wsconn *conn);
@@ -66,8 +69,6 @@ struct wsconn
                           buf_t *out);
      void (*on_close)(struct wsconn *conn);
      int (*on_handshake)(struct wsconn *conn, http_req_t *req);
-     int close_on_write;
-     int closing;
      struct location_config *location;
 };
 typedef struct wsconn wsconn_t;

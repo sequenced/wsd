@@ -12,8 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "wstypes.h"
-//#include "http.h"
-//#include "ws.h"
+#include "http.h"
+#include "ws.h"
 
 #define MAX_EVENTS 256
 #define BUF_SIZE 8192
@@ -78,14 +78,31 @@ io_loop()
           A(nfd >= 0);
           A(nfd <= MAX_EVENTS);
 
-          int n = 0;
-          for (; n < nfd; ++n) {
+          int n;
+          for (n = 0; n < nfd; ++n) {
                if (evs[n].data.fd == wsd_cfg->lfd) {
                     AZ(on_accept(evs[n].data.fd));
                } else if (evs[n].events & EPOLLIN) {
                     int rv = on_read((wsconn_t*)evs[n].data.ptr);
                     if (0 >= rv) {
                          cleanup(&evs[n]);
+                    } else if (((wsconn_t*)evs[n].data.ptr)->write) {
+                         evs[n].events |= EPOLLOUT;
+                         AZ(epoll_ctl(epfd,
+                                      EPOLL_CTL_MOD,
+                                      ((wsconn_t*)evs[n].data.ptr)->fd,
+                                      &evs[n]));
+                    }
+               } else if (evs[n].events & EPOLLOUT) {
+                    int rv = on_write((wsconn_t*)evs[n].data.ptr);
+                    if (0 > rv) {
+                         cleanup(&evs[n]);
+                    } else if (0 == rv) {
+                         evs[n].events &= ~EPOLLOUT;
+                         AZ(epoll_ctl(epfd,
+                                      EPOLL_CTL_MOD,
+                                      ((wsconn_t*)evs[n].data.ptr)->fd,
+                                      &evs[n]));
                     }
                } else if (evs[n].events & EPOLLERR ||
                           evs[n].events & EPOLLHUP ||
@@ -128,7 +145,12 @@ on_accept(int lfd)
      ev.data.ptr = malloc(sizeof(wsconn_t));
      A(ev.data.ptr);
      memset((void*)ev.data.ptr, 0, sizeof(wsconn_t));
-     ((wsconn_t*)ev.data.ptr)->fd = fd;
+     wsconn_t *conn = (wsconn_t*)ev.data.ptr;
+     conn->fd = fd;
+     conn->on_read = http_on_read;
+     conn->on_handshake = ws_on_handshake;
+     conn->buf_in = buf_alloc(8192);
+     conn->buf_out = buf_alloc(8192);
 
      AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
 
@@ -142,80 +164,63 @@ on_accept(int lfd)
 static int
 on_read(wsconn_t *conn)
 {
-/*     int len;
-       len = read(conn->fd,
-       buf_ref(conn->buf_in),
-       buf_len(conn->buf_in));
+     int len = read(conn->fd,
+                    buf_ref(conn->buf_in),
+                    buf_len(conn->buf_in));
 
-       if (0>len)
-       {
-       if (errno==EAGAIN || errno==EWOULDBLOCK)
-       return 1;
+     if (0 < len) {
+          buf_fwd(conn->buf_in, len);
+          return conn->on_read(conn);
+     }
 
-       return -1;
-       }
-
-       if (0==len)
-       return 0;
-
-       buf_fwd(conn->buf_in, len);
-       if (0>conn->on_read(conn))
-       return 0;*/
-
-     char buf[1024];
-     memset((void*)buf, 0, 1024);
-     int rv = read(conn->fd, buf, 1023);
-     printf("%s", buf);
-
-     return rv;
+     return len;
 }
 
 static int
 on_write(wsconn_t *conn)
 {
-/*     buf_flip(conn->buf_out);
+     buf_flip(conn->buf_out);
 
-       if (LOG_VVERBOSE<=wsd_cfg->verbose)
-       printf("wschild: on_write: fd=%d: %d byte(s)\n",
-       conn->fd, buf_len(conn->buf_out));
+     if (LOG_VVERBOSE <= wsd_cfg->verbose)
+          printf("wschild: %s: fd=%d: %d byte(s)\n",
+                 __func__,
+                 conn->fd,
+                 buf_len(conn->buf_out));
 
-       int len;
-       len=write(conn->fd,
-       buf_ref(conn->buf_out),
-       buf_len(conn->buf_out));
+     int len;
+     len = write(conn->fd,
+                 buf_ref(conn->buf_out),
+                 buf_len(conn->buf_out));
 
-       if (0>len)
-       {
-       if (errno==EAGAIN || errno==EWOULDBLOCK)
-       {
-       buf_flip(conn->buf_out);
-       return 1;
-       }
+     int rv = 1;
+     if (0 < len) {
+          buf_fwd(conn->buf_out, len);
+          buf_compact(conn->buf_out);
 
-       return -1;
-       }
+          if (0 == buf_pos(conn->buf_out)) {
+               if (conn->close_on_write) {
+                    if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+                         printf("wschild: %s: fd=%d: close-on-write\n",
+                                __func__,
+                                conn->fd);
+                    }
 
-       if (0==len)
-       return 0;
+                    rv = (-1);
+               } else {
+                    rv = 0;
+               }
+          }
+     }
+     
+     if (0 > len) {
+          if (errno == EAGAIN || errno == EWOULDBLOCK) {
+               buf_flip(conn->buf_out);
+          } else {
+               rv = (-1);
+          }
+     }
 
-       buf_fwd(conn->buf_out, len);
-       buf_compact(conn->buf_out);
-       if (0==buf_pos(conn->buf_out))
-       {*/
-     /* buffer empty, nothing else to write */
-/*          conn->pfd->events&=(~POLLOUT);
-
-            if (conn->close_on_write)
-            {
-            if (LOG_VVERBOSE<=wsd_cfg->verbose)
-            printf("wschild: on_write: fd=%d: close-on-write true and buffer empty\n",
-            conn->pfd->fd);
-
-            return 0;
-            }
-            }*/
-
-     return 1;
+     return rv;
 }
 
 static void

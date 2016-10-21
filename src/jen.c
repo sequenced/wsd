@@ -32,7 +32,7 @@ jen_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 {
   buf_clear(scratch);
   /* TODO Make hop ref id unique. */
-//  buf_put_long(scratch, (unsigned long long)conn->pfd->fd);
+  buf_put_long(scratch, (unsigned long long)conn->fd);
   buf_put_buf(scratch, in);
   buf_flip(scratch);
 
@@ -248,7 +248,7 @@ jen_on_shmem_read(wsconn_t *conn)
   while (0<buf_len(conn->buf_in))
     buf_put(dst->buf_out, buf_get(conn->buf_in));
 
-//  dst->pfd->events|=POLLOUT;
+  dst->write = 1;
 
   return 1;
 }

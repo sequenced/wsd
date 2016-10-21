@@ -83,7 +83,7 @@ buf_ref(buf_t *b)
 inline int
 buf_len(buf_t *b)
 {
-  return (b->limit-b->pos);
+     return (b->limit - b->pos);
 }
 
 inline char*

@@ -209,7 +209,7 @@ bad:
 
 ok:
      buf_clear(conn->buf_in);
-//     conn->pfd->events |= POLLOUT;
+     conn->write = 1;
 
      return 1;
 }
@@ -390,7 +390,7 @@ on_close_frame(wsconn_t *conn, buf_t *b)
           if (0>prepare_close_frame(conn->buf_out, status))
                return -1;
 
-//          conn->pfd->events |= POLLOUT;
+          conn->write = 1;
           conn->close_on_write = 1;
           conn->closing = 1;
      }
@@ -449,7 +449,7 @@ start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status)
      if (0>prepare_close_frame(conn->buf_out, status))
           return -1;
 
-//     conn->pfd->events |= POLLOUT;
+     conn->write = 1;
      conn->closing = 1;
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose)

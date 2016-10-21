@@ -139,7 +139,7 @@ http_on_read(wsconn_t *conn)
 
 error:
      buf_clear(conn->buf_in);
-//     conn->pfd->events|=POLLOUT;
+     conn->write = 1;
      conn->close_on_write = 1;
 
      return 1;
@@ -177,7 +177,7 @@ int
 http_prepare_response(buf_t *b, const char *s)
 {
      /* see RFC2616 section 6.1.1 */
-     if (buf_len(b)<(strlen(s)))
+     if (buf_len(b) < strlen(s))
           return -1;
 
      strcpy(buf_ref(b), s);
