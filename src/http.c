@@ -28,11 +28,11 @@ http_on_read(wsconn_t *conn)
 
      if (LOG_VVERBOSE == wsd_cfg->verbose)
           printf("http: on_read: fd=%d: %d byte(s)\n",
-                 conn->pfd->fd,
+                 conn->fd,
                  buf_len(conn->buf_in));
      else if (LOG_VVVERBOSE == wsd_cfg->verbose)
           printf("http: on_read: fd=%d: %s",
-                 conn->pfd->fd,
+                 conn->fd,
                  buf_ref(conn->buf_in));
 
      int rv;
@@ -139,7 +139,7 @@ http_on_read(wsconn_t *conn)
 
 error:
      buf_clear(conn->buf_in);
-     conn->pfd->events|=POLLOUT;
+//     conn->pfd->events|=POLLOUT;
      conn->close_on_write = 1;
 
      return 1;

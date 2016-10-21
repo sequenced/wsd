@@ -32,14 +32,14 @@ jen_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 {
   buf_clear(scratch);
   /* TODO Make hop ref id unique. */
-  buf_put_long(scratch, (unsigned long long)conn->pfd->fd);
+//  buf_put_long(scratch, (unsigned long long)conn->pfd->fd);
   buf_put_buf(scratch, in);
   buf_flip(scratch);
 
   if (LOG_VVERBOSE <= wsd_cfg->verbose)
     printf("jen: on_frame: fd=%d: src_fd=%d: %d byte(s)\n",
            md_in,
-           conn->pfd->fd,
+           conn->fd,
            buf_len(scratch));
 
   if (0 > ssys_shmem_write(md_in, buf_ref(scratch), buf_len(scratch)))
@@ -121,7 +121,7 @@ jen_on_open(const wsd_config_t *cfg, wsconn_t *conn)
 
   if (LOG_VVERBOSE <= wsd_cfg->verbose)
     printf("jen: on_open: fd=%d, md_ref_count: %d\n",
-           conn->pfd->fd,
+           conn->fd,
            md_ref_count);
 
   return md_ref_count;
@@ -135,7 +135,7 @@ jen_on_close(wsconn_t *conn)
 
   if (LOG_VVERBOSE <= wsd_cfg->verbose)
     printf("jen: on_close: fd=%d, md_ref_count=%d\n",
-           conn->pfd->fd,
+           conn->fd,
            md_ref_count);
 
   if (0 == md_ref_count)
@@ -172,7 +172,7 @@ jen_on_shmem_read(wsconn_t *conn)
   buf_clear(conn->buf_in);
 
   int len;
-  len=ssys_shmem_read(conn->pfd->fd,
+  len=ssys_shmem_read(conn->fd,
                       buf_ref(conn->buf_in),
                       buf_len(conn->buf_in));
 
@@ -205,12 +205,12 @@ jen_on_shmem_read(wsconn_t *conn)
 
   if (LOG_VVERBOSE == wsd_cfg->verbose)
     printf("jen: on_shmem_read: fd=%d: dst_fd=%d: %d byte(s)\n",
-           conn->pfd->fd,
-           dst->pfd->fd,
+           conn->fd,
+           dst->fd,
            len);
   else if (LOG_VVVERBOSE == wsd_cfg->verbose)
     {
-      printf("jen: fd=%d: dst_fd=%d: ", conn->pfd->fd, dst->pfd->fd);
+      printf("jen: fd=%d: dst_fd=%d: ", conn->fd, dst->fd);
       int old=buf_len(conn->buf_in);
 
       while (0<buf_len(conn->buf_in))
@@ -225,7 +225,7 @@ jen_on_shmem_read(wsconn_t *conn)
     {
       if (LOG_VVVERBOSE <= wsd_cfg->verbose)
         printf("jen: fd=%d: negative frame length, discarding data\n",
-               conn->pfd->fd);
+               conn->fd);
 
       return 0;
     }
@@ -234,7 +234,7 @@ jen_on_shmem_read(wsconn_t *conn)
     {
       if (LOG_VVVERBOSE <= wsd_cfg->verbose)
         printf("jen: fd=%d: output buffer too small, discarding data\n",
-               conn->pfd->fd);
+               conn->fd);
 
       return 0;
     }
@@ -248,7 +248,7 @@ jen_on_shmem_read(wsconn_t *conn)
   while (0<buf_len(conn->buf_in))
     buf_put(dst->buf_out, buf_get(conn->buf_in));
 
-  dst->pfd->events|=POLLOUT;
+//  dst->pfd->events|=POLLOUT;
 
   return 1;
 }

@@ -209,7 +209,7 @@ bad:
 
 ok:
      buf_clear(conn->buf_in);
-     conn->pfd->events |= POLLOUT;
+//     conn->pfd->events |= POLLOUT;
 
      return 1;
 }
@@ -251,7 +251,7 @@ ws_on_read(wsconn_t *conn)
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose)
           printf("ws: on_read: fd=%d: frame: 0x%hhx, 0x%hhx, opcode=0x%x, len=%lu\n",
-                 conn->pfd->fd,
+                 conn->fd,
                  wsf.byte1,
                  wsf.byte2,
                  OPCODE(wsf.byte1),
@@ -291,7 +291,7 @@ dispatch(wsconn_t *conn, wsframe_t *wsf)
      {
           if (LOG_VVVERBOSE <= wsd_cfg->verbose)
                printf("jen: unknown opcode: fd=%d: 0x%x\n",
-                      conn->pfd->fd,
+                      conn->fd,
                       OPCODE(wsf->byte1));
 
           /* unknown opcode */
@@ -382,7 +382,7 @@ on_close_frame(wsconn_t *conn, buf_t *b)
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose)
           printf("ws: on_close_frame: fd=%d: status=%u\n",
-                 conn->pfd->fd,
+                 conn->fd,
                  status);
 
      if (!conn->closing)
@@ -390,7 +390,7 @@ on_close_frame(wsconn_t *conn, buf_t *b)
           if (0>prepare_close_frame(conn->buf_out, status))
                return -1;
 
-          conn->pfd->events |= POLLOUT;
+//          conn->pfd->events |= POLLOUT;
           conn->close_on_write = 1;
           conn->closing = 1;
      }
@@ -449,12 +449,12 @@ start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status)
      if (0>prepare_close_frame(conn->buf_out, status))
           return -1;
 
-     conn->pfd->events |= POLLOUT;
+//     conn->pfd->events |= POLLOUT;
      conn->closing = 1;
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose)
           printf("ws: starting_closing_handshake: fd=%d: status=%u\n",
-                 conn->pfd->fd,
+                 conn->fd,
                  status);
 
      return 1;

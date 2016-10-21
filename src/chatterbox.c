@@ -14,7 +14,7 @@ chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 
   if (LOG_VVVERBOSE<=wsd_cfg->verbose)
     {
-      printf("chatterbox: fd=%d: ", conn->pfd->fd);
+      printf("chatterbox: fd=%d: ", conn->fd);
       while (0<buf_len(in))
         printf("%c", buf_get(in));
       printf("\n");
@@ -44,7 +44,7 @@ chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 
       buf_rwnd(in, len);
 
-      cursor->conn->pfd->events|=POLLOUT;
+//      cursor->conn->pfd->events|=POLLOUT;
     }
 
   return 1;

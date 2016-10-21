@@ -134,7 +134,7 @@ main(int argc, char **argv)
           }
 
           /* child */
-          if (0 > (cfg.sock = open_socket(cfg.port)))
+          if (0 > (cfg.lfd = open_socket(cfg.port)))
           {
                perror("wsd: open_socket");
                exit(1);
@@ -143,7 +143,7 @@ main(int argc, char **argv)
           if (0 == getuid())
                if (0 > drop_priv(cfg.uid))
                {
-                    close(cfg.sock);
+                    close(cfg.lfd);
                     exit(1);
                }
 

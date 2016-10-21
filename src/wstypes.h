@@ -55,12 +55,14 @@ typedef struct
 
 struct wsconn
 {
-     struct pollfd *pfd;
+     int fd;
      buf_t *buf_in;
      buf_t *buf_out;
      int (*on_read)(struct wsconn *conn);
      int (*on_write)(struct wsconn *conn);
-     int (*on_data_frame)(struct wsconn *conn, wsframe_t *wsf, buf_t *in,
+     int (*on_data_frame)(struct wsconn *conn,
+                          wsframe_t *wsf,
+                          buf_t *in,
                           buf_t *out);
      void (*on_close)(struct wsconn *conn);
      int (*on_handshake)(struct wsconn *conn, http_req_t *req);
@@ -75,8 +77,9 @@ typedef struct
      uid_t uid;
      char *username;
      char *hostname;
-     int sock;
+     int lfd;
      int port;
+     int epfd;
      int verbose;
      int no_fork;
      int (*register_user_fd)(int fd,
