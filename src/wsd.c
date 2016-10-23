@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include <dlfcn.h>
 #include <stdlib.h>
@@ -147,6 +148,9 @@ main(int argc, char **argv)
                     exit(1);
                }
 
+          cfg.epfd = epoll_create(1);
+          A(cfg.epfd >= 0);
+          
           int rv;
           rv = wschild_main(&cfg);
 

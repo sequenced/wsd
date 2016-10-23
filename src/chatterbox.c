@@ -14,7 +14,7 @@ chatterbox_on_frame(wsconn_t *conn, wsframe_t *wsf, buf_t *in, buf_t *out)
 
   if (LOG_VVVERBOSE<=wsd_cfg->verbose)
     {
-      printf("chatterbox: fd=%d: ", conn->fd);
+      printf("chatterbox: sfd=%d: ", conn->sfd);
       while (0<buf_len(in))
         printf("%c", buf_get(in));
       printf("\n");

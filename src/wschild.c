@@ -7,6 +7,7 @@
 #include <syslog.h>
 #include <errno.h>
 #include <unistd.h>
+#include <time.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <stdio.h>
@@ -19,28 +20,20 @@
 #define BUF_SIZE 8192
 #define DEFAULT_QUANTUM (5000)
 
-#define ALERT(func, file, line)                                         \
-     syslog(LOG_ALERT, "non-zero result: %s, %s:%s", func, file, line)
-#define AZ(exp)                                                         \
-     if (!((exp) == 0)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
-#define AN(exp)                                                         \
-     if (!((exp) != 0)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
-#define A(exp)                                                          \
-     if (!(exp)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
 #define log_addr(msg, func, addr, fd)                                   \
      printf(msg, func, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), fd);
 
 const wsd_config_t *wsd_cfg = NULL;
-static int epfd = -1;
 
 /* forward declarations */
 static int on_accept(int fd);
-static int on_read(wsconn_t *conn);
+static int on_read(struct epoll_glue *eg);
 static int on_write(wsconn_t *conn);
 static void cleanup(struct epoll_event *ev);
 static void on_close(wsconn_t *conn);
 static int io_loop();
 static void sigterm(int sig);
+static unsigned long hash(struct sockaddr_in *saddr, struct timespec *ts);
 
 int
 wschild_main(const wsd_config_t *cfg)
@@ -53,9 +46,6 @@ wschild_main(const wsd_config_t *cfg)
      AZ(sigaction(SIGTERM, &act, NULL));
 
      AZ(listen(wsd_cfg->lfd, 5));
-
-     epfd = epoll_create(1);
-     A(epfd >= 0);
 
      return io_loop();
 }
@@ -71,10 +61,10 @@ io_loop()
 
      ev.events = EPOLLIN;
      ev.data.fd = wsd_cfg->lfd;
-     AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, wsd_cfg->lfd, &ev));
+     AZ(epoll_ctl(wsd_cfg->epfd, EPOLL_CTL_ADD, wsd_cfg->lfd, &ev));
 
      while (1) {
-          int nfd = epoll_wait(epfd, evs, MAX_EVENTS, DEFAULT_QUANTUM);
+          int nfd = epoll_wait(wsd_cfg->epfd, evs, MAX_EVENTS, DEFAULT_QUANTUM);
           A(nfd >= 0);
           A(nfd <= MAX_EVENTS);
 
@@ -83,25 +73,28 @@ io_loop()
                if (evs[n].data.fd == wsd_cfg->lfd) {
                     AZ(on_accept(evs[n].data.fd));
                } else if (evs[n].events & EPOLLIN) {
-                    int rv = on_read((wsconn_t*)evs[n].data.ptr);
+                    struct epoll_glue *eg = (struct epoll_glue*)evs[n].data.ptr;
+                    int rv = on_read(eg);
                     if (0 >= rv) {
                          cleanup(&evs[n]);
-                    } else if (((wsconn_t*)evs[n].data.ptr)->write) {
+                    } else if (conn->write) {
                          evs[n].events |= EPOLLOUT;
-                         AZ(epoll_ctl(epfd,
+                         conn->write = 0;
+                         AZ(epoll_ctl(wsd_cfg->epfd,
                                       EPOLL_CTL_MOD,
-                                      ((wsconn_t*)evs[n].data.ptr)->fd,
+                                      conn->fd,
                                       &evs[n]));
                     }
                } else if (evs[n].events & EPOLLOUT) {
-                    int rv = on_write((wsconn_t*)evs[n].data.ptr);
-                    if (0 > rv) {
+                    wsconn_t *conn = (wsconn_t*)evs[n].data.ptr;
+                    int rv = on_write(conn);
+                    if (0 > rv || conn->close_on_write) {
                          cleanup(&evs[n]);
                     } else if (0 == rv) {
                          evs[n].events &= ~EPOLLOUT;
-                         AZ(epoll_ctl(epfd,
+                         AZ(epoll_ctl(wsd_cfg->epfd,
                                       EPOLL_CTL_MOD,
-                                      ((wsconn_t*)evs[n].data.ptr)->fd,
+                                      conn->fd,
                                       &evs[n]));
                     }
                } else if (evs[n].events & EPOLLERR ||
@@ -142,17 +135,30 @@ on_accept(int lfd)
      memset((void*)&ev, 0, sizeof(ev));
 
      ev.events = EPOLLIN | EPOLLRDHUP;
-     ev.data.ptr = malloc(sizeof(wsconn_t));
+     ev.data.ptr = malloc(sizeof(struct epoll_glue));
      A(ev.data.ptr);
-     memset((void*)ev.data.ptr, 0, sizeof(wsconn_t));
-     wsconn_t *conn = (wsconn_t*)ev.data.ptr;
-     conn->fd = fd;
+     struct epoll_glue *eg = (struct epoll_glue*)ev.data.ptr;
+     eg->fd = fd;
+     eg->conn = malloc(sizeof(wsconn_t));
+     A(eg->conn);
+
+     memset(eg->conn, 0, sizeof(wsconn_t));
+     wsconn_t *conn = eg->conn;
+
+     conn->sfd = fd;
+     conn->pfd_in = -1;
+     conn->pfd_out = -1;
      conn->on_read = http_on_read;
      conn->on_handshake = ws_on_handshake;
      conn->buf_in = buf_alloc(8192);
      conn->buf_out = buf_alloc(8192);
 
-     AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
+     struct timespec ts;
+     memset((void*)&ts, 0, sizeof(ts));
+     AZ(clock_gettime(CLOCK_REALTIME_COARSE, &ts));
+     conn->hash = hash(&saddr, &ts);
+
+     AZ(epoll_ctl(wsd_cfg->epfd, EPOLL_CTL_ADD, fd, &ev));
 
      if (wsd_cfg->verbose) {
           log_addr("wschild: %s: %s:%d, fd=%d\n", __func__, saddr, fd);
@@ -161,9 +167,21 @@ on_accept(int lfd)
      return 0;
 }
 
+static unsigned long
+hash(struct sockaddr_in *saddr, struct timespec *ts) {
+     unsigned long h = saddr->sin_addr.s_addr;
+     h = h << 16;
+     h |= saddr->sin_port;
+     h = h << 16;
+     h |= ((ts->tv_nsec &0x00000000ffff0000 >> 16));
+     return h;
+}
+
 static int
-on_read(wsconn_t *conn)
+on_read(struct epoll_glue *eg)
 {
+     return eg->conn->on_read(eg->fd, eg->conn);
+/*     if (eg->fd == eg->conn->sfd
      int len = read(conn->fd,
                     buf_ref(conn->buf_in),
                     buf_len(conn->buf_in));
@@ -173,7 +191,7 @@ on_read(wsconn_t *conn)
           return conn->on_read(conn);
      }
 
-     return len;
+     return len;*/
 }
 
 static int

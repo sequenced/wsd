@@ -198,7 +198,7 @@ ws_on_handshake(wsconn_t *conn, http_req_t *hr)
      conn->location = loc;
 
      /* application protocol can reject */
-     if (0>loc->on_open(wsd_cfg, conn))
+     if (0 > loc->on_open(wsd_cfg, conn))
           goto bad;
 
      goto ok;
@@ -206,6 +206,7 @@ ws_on_handshake(wsconn_t *conn, http_req_t *hr)
 bad:
      if (0 > http_prepare_response(conn->buf_out, HTTP_400))
           return (-1);
+     conn->close_on_write = 1;
 
 ok:
      buf_clear(conn->buf_in);
@@ -250,8 +251,8 @@ ws_on_read(wsconn_t *conn)
      }
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose)
-          printf("ws: on_read: fd=%d: frame: 0x%hhx, 0x%hhx, opcode=0x%x, len=%lu\n",
-                 conn->fd,
+          printf("ws: on_read: sfd=%d: frame: 0x%hhx, 0x%hhx, opcode=0x%x, len=%lu\n",
+                 conn->sfd,
                  wsf.byte1,
                  wsf.byte2,
                  OPCODE(wsf.byte1),
@@ -290,8 +291,8 @@ dispatch(wsconn_t *conn, wsframe_t *wsf)
      else
      {
           if (LOG_VVVERBOSE <= wsd_cfg->verbose)
-               printf("jen: unknown opcode: fd=%d: 0x%x\n",
-                      conn->fd,
+               printf("jen: unknown opcode: sfd=%d: 0x%x\n",
+                      conn->sfd,
                       OPCODE(wsf->byte1));
 
           /* unknown opcode */
@@ -381,8 +382,8 @@ on_close_frame(wsconn_t *conn, buf_t *b)
           status = be16toh(buf_get_short(b));
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose)
-          printf("ws: on_close_frame: fd=%d: status=%u\n",
-                 conn->fd,
+          printf("ws: on_close_frame: sfd=%d: status=%u\n",
+                 conn->sfd,
                  status);
 
      if (!conn->closing)
@@ -453,8 +454,8 @@ start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status)
      conn->closing = 1;
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose)
-          printf("ws: starting_closing_handshake: fd=%d: status=%u\n",
-                 conn->fd,
+          printf("ws: starting_closing_handshake: sfd=%d: status=%u\n",
+                 conn->sfd,
                  status);
 
      return 1;

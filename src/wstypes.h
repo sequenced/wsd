@@ -4,6 +4,15 @@
 #include <sys/types.h>
 #include "list.h"
 
+#define ALERT(func, file, line)                 \
+     printf("%s:%d: %s\n", file, line, func);
+#define AZ(exp)                                                         \
+     if (!((exp) == 0)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
+#define AN(exp)                                                         \
+     if (!((exp) != 0)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
+#define A(exp)                                                          \
+     if (!(exp)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
+
 #define HASH32_TABLE_SIZE  256
 #define HASH_ENTRY_BUCKETS 8
 #define UNASSIGNED         (-1)
@@ -55,12 +64,17 @@ typedef struct
 
 struct wsconn
 {
-     int fd;
+     int sfd;
+     int pfd_in;
+     int pfd_out;
      int close_on_write;
      int closing;
      int write;
-     buf_t *buf_in;
-     buf_t *buf_out;
+     unsigned long hash;
+     buf_t *sbuf_in;
+     buf_t *pbuf_in;
+     buf_t *sbuf_out;
+     buf_t *pbuf_put;
      int (*on_read)(struct wsconn *conn);
      int (*on_write)(struct wsconn *conn);
      int (*on_data_frame)(struct wsconn *conn,
@@ -72,6 +86,11 @@ struct wsconn
      struct location_config *location;
 };
 typedef struct wsconn wsconn_t;
+
+struct epoll_glue {
+     int fd;
+     wsconn_t *conn;
+};
 
 typedef struct
 {

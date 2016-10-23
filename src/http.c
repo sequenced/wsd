@@ -27,12 +27,12 @@ http_on_read(wsconn_t *conn)
      buf_flip(conn->buf_in);
 
      if (LOG_VVERBOSE == wsd_cfg->verbose)
-          printf("http: on_read: fd=%d: %d byte(s)\n",
-                 conn->fd,
+          printf("http: on_read: sfd=%d: %d byte(s)\n",
+                 conn->sfd,
                  buf_len(conn->buf_in));
      else if (LOG_VVVERBOSE == wsd_cfg->verbose)
-          printf("http: on_read: fd=%d: %s",
-                 conn->fd,
+          printf("http: on_read: sfd=%d: %s",
+                 conn->sfd,
                  buf_ref(conn->buf_in));
 
      int rv;

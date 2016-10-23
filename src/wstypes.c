@@ -299,6 +299,6 @@ hash32_table_hash(int val)
 void
 buf_put_buf(buf_t *dst, buf_t *src)
 {
-  while (buf_len(dst))
-    buf_put(dst, buf_safe_get(src));
+     while (buf_len(dst) && buf_len(src))
+          buf_put(dst, buf_get(src));
 }
