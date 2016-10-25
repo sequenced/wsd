@@ -16,7 +16,7 @@
 #include "wstypes.h"
 
 #define MAX_EVENTS 256
-#define BUF_SIZE 8192
+#define BUF_SIZE 128
 #define DEFAULT_QUANTUM 5000
 
 #define ERRET(exp, text)                        \
@@ -24,6 +24,7 @@
 
 struct glue {
      unsigned long magic;
+     unsigned long hash;
      int fd;
      int (*on_read)(struct glue*);
      int (*on_write)(struct glue*);
@@ -35,6 +36,7 @@ struct glue {
 
 struct endpoint {
      unsigned long magic;
+     unsigned long hash;
      char snd_buf[BUF_SIZE];
      char rcv_buf[BUF_SIZE];
      int spos;
@@ -63,6 +65,17 @@ static int pipe_close(ep_t *ep);
 static int on_accept(int lfd);
 static void init_snd_pipe();
 static void init_rcv_pipe();
+static unsigned long hash(struct sockaddr_in *saddr, struct timespec *ts);
+
+static unsigned long
+hash(struct sockaddr_in *saddr, struct timespec *ts) {
+     unsigned long h = saddr->sin_addr.s_addr;
+     h = h << 16;
+     h |= saddr->sin_port;
+     h = h << 16;
+     h |= ((ts->tv_nsec &0x00000000ffff0000 >> 16));
+     return h;
+}
 
 static void
 init_snd_pipe() {
@@ -196,8 +209,6 @@ on_accept(int lfd)
                       SOCK_NONBLOCK);
      A(fd >= 0);
 
-     printf("*** %s: eg->fd=%d\n", __func__, fd);
-
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
      ev.events = EPOLLIN | EPOLLRDHUP;
@@ -211,7 +222,16 @@ on_accept(int lfd)
      eg->on_close = sock_on_close;
      eg->buf_in = buf_alloc(BUF_SIZE);
      eg->buf_out = buf_alloc(BUF_SIZE);
+     struct timespec ts;
+     memset((void*)&ts, 0, sizeof(ts));
+     AZ(clock_gettime(CLOCK_REALTIME_COARSE, &ts));
+     eg->hash = hash(&saddr, &ts);
      AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
+
+     printf("*** %s: eg->fd=%d, hash=0x%lx\n",
+            __func__,
+            fd,
+            eg->hash);
 
      return 0;
 }
