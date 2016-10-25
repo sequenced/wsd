@@ -23,6 +23,7 @@
      if (exp) { perror(text); return (-1); }
 
 struct glue {
+     unsigned long magic;
      int fd;
      int (*on_read)(struct glue*);
      int (*on_write)(struct glue*);
@@ -33,14 +34,16 @@ struct glue {
 };
 
 struct endpoint {
+     unsigned long magic;
      char snd_buf[BUF_SIZE];
      char rcv_buf[BUF_SIZE];
      int spos;
      int rpos;
      int fd;
-     int (*read)(ep_t *ep);
-     int (*write)(ep_t *ep);
-     int (*close)(ep_t *ep);
+     int (*read)(struct endpoint *ep);
+     int (*write)(struct endpoint *ep);
+     int (*close)(struct endpoint *ep);
+     struct glue *sk;
 };
 typedef struct endpoint ep_t;
 
@@ -54,10 +57,30 @@ static ep_t *rcv_pipe;
 static int sock_on_read(struct glue *eg);
 static int sock_on_write(struct glue *eg);
 static int sock_on_close(struct glue *eg);
-static int pipe_write(struct glue *eg);
-static int pipe_read(struct glue *eg);
-static int pipe_close(struct glue *eg);
+static int pipe_write(ep_t *ep);
+static int pipe_read(ep_t *ep);
+static int pipe_close(ep_t *ep);
 static int on_accept(int lfd);
+static void init_snd_pipe();
+static void init_rcv_pipe();
+
+static void
+init_snd_pipe() {
+     memset(snd_pipe, 0, sizeof(ep_t));
+     snd_pipe->magic = 0xcafebabe;
+     snd_pipe->fd = -1;
+     snd_pipe->write = pipe_write;
+     snd_pipe->close = pipe_close;
+}
+
+static void
+init_rcv_pipe() {
+     memset(rcv_pipe, 0, sizeof(ep_t));
+     rcv_pipe->magic = 0xcafebabe;
+     rcv_pipe->fd = -1;
+     rcv_pipe->read = pipe_read;
+     rcv_pipe->close = pipe_close;
+}
 
 int main(int argc, char **argv)
 {
@@ -69,18 +92,12 @@ int main(int argc, char **argv)
 
      snd_pipe = malloc(sizeof(ep_t));
      A(snd_pipe);
-     memset(snd_pipe, 0, sizeof(ep_t));
-     snd_pipe->fd = -1;
-     snd_pipe->write = pipe_write;
-     snd_pipe->close = pipe_close;
+     init_snd_pipe();
 
      rcv_pipe = malloc(sizeof(ep_t));
      A(rcv_pipe);
-     memset(rcv_pipe, 0, sizeof(ep_t));
-     rcv_pipe->fd = -1;
-     rcv_pipe->read = pipe_read;
-     rcv_pipe->close = pipe_close;
-
+     init_rcv_pipe();
+ 
      int lfd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
      A(lfd >= 0);
 
@@ -114,8 +131,6 @@ int main(int argc, char **argv)
           A(nfd >= 0);
           A(nfd <= MAX_EVENTS);
 
-          printf("*** %s: nfd=%d\n", __func__, nfd);
-
           int n;
           for (n = 0; n < nfd; ++n) {
 
@@ -123,19 +138,44 @@ int main(int argc, char **argv)
                     AZ(on_accept(evs[n].data.fd));
                     continue;
                }
-               
-               struct glue *eg = (struct glue*)evs[n].data.ptr;
-               if (evs[n].events & EPOLLIN) {
-                    int rv = eg->on_read(eg);
-                    if (0 > rv)
+
+               printf("*** %s: nfd=%d, magic=0x%lx, events=0x%x\n",
+                      __func__,
+                      nfd,
+                      *(unsigned long*)evs[n].data.ptr,
+                      evs[n].events);
+
+               if (0xcafebabe == *(unsigned long*)(evs[n].data.ptr)) {
+                    /* New style */
+                    ep_t *ep = (ep_t*)evs[n].data.ptr;
+                    if (evs[n].events & EPOLLIN ||
+                        evs[n].events & EPOLLPRI) {
+                         int rv = ep->read(ep);
+                         if (0 > rv)
+                              AZ(ep->close(ep));
+                    } else if (evs[n].events & EPOLLOUT) {
+                         int rv = ep->write(ep);
+                         if (0 > rv)
+                              AZ(ep->close(ep));
+                    } else if (evs[n].events & EPOLLHUP ||
+                               evs[n].events & EPOLLRDHUP ||
+                               evs[n].events & EPOLLERR) {
+                         AZ(ep->close(ep));
+                    }
+               } else {
+                    struct glue *eg = (struct glue*)evs[n].data.ptr;
+                    if (evs[n].events & EPOLLIN) {
+                         int rv = eg->on_read(eg);
+                         if (0 > rv)
+                              AZ(eg->on_close(eg));
+                    } else if (evs[n].events & EPOLLOUT) {
+                         int rv = eg->on_write(eg);
+                         if (0 > rv)
+                              AZ(eg->on_close(eg));
+                    } else if (evs[n].events & EPOLLHUP ||
+                               evs[n].events & EPOLLRDHUP) {
                          AZ(eg->on_close(eg));
-               } else if (evs[n].events & EPOLLOUT) {
-                    int rv = eg->on_write(eg);
-                    if (0 > rv)
-                         AZ(eg->on_close(eg));
-               } else if (evs[n].events & EPOLLHUP ||
-                          evs[n].events & EPOLLRDHUP) {
-                    AZ(eg->on_close(eg));
+                    }
                }
           }
      }
@@ -191,18 +231,22 @@ pipe_read(ep_t *ep)
 
      ep->rpos = len;
 
-     while (buf_len(//TODO continue
-     buf_put_buf(eg->other->buf_out, eg->buf_in);
-     buf_flip(eg->other->buf_out);
+     //TODO Lookup socket!
+     int k = 0;
+     while (0 < buf_len(ep->sk->buf_out) && k < ep->rpos)
+          buf_put(ep->sk->buf_out, ep->rcv_buf[k++]);
+     
+     buf_flip(ep->sk->buf_out);
 
-     buf_compact(eg->buf_in);
+     AZ(k - ep->rpos);
+     ep->rpos = 0;
 
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
      ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
-     ev.data.ptr = eg->other;
+     ev.data.ptr = ep->sk;
 
-     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, eg->other->fd, &ev));
+     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->sk->fd, &ev));
 
      return 0;
 }
@@ -237,7 +281,8 @@ sock_on_read(struct glue *eg)
 
           printf("\t%s: opened %s\n", __func__, snd_pathname);
 
-          while (snd_pipe->spos < sizeof(snd_pipe->snd_buf))
+          while (snd_pipe->spos < sizeof(snd_pipe->snd_buf) &&
+                 0 < buf_len(eg->buf_in))
                snd_pipe->snd_buf[snd_pipe->spos++] = buf_get(eg->buf_in);
 
           struct epoll_event ev;
@@ -249,7 +294,7 @@ sock_on_read(struct glue *eg)
 
      if (-1 == rcv_pipe->fd) {
           int rv = mkfifo(rcv_pathname, 0600);
-          ERRET(0 > rv && errno != EEXIST);
+          ERRET(0 > rv && errno != EEXIST, "mkfifo");
 
           rcv_pipe->fd = open(rcv_pathname, O_RDONLY | O_NONBLOCK);
           A(rcv_pipe->fd >= 0);
@@ -257,10 +302,13 @@ sock_on_read(struct glue *eg)
           printf("\t%s: opened %s\n", __func__, rcv_pathname);
 
           struct epoll_event ev;
-          memset(&ev2, 0, sizeof(ev));
+          memset(&ev, 0, sizeof(ev));
           ev.events = EPOLLIN;
           ev.data.ptr = rcv_pipe;
           AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, rcv_pipe->fd, &ev));
+
+          //TODO Unlink and replace with lookup!
+          rcv_pipe->sk = eg;
      } else {
           while (snd_pipe->spos < sizeof(snd_pipe->snd_buf))
                snd_pipe->snd_buf[snd_pipe->spos++] = buf_get(eg->buf_in);
@@ -368,7 +416,6 @@ pipe_write(ep_t *ep)
           printf("\t%s: removing EPOLLOUT: fd=%d\n",
                  __func__,
                  ep->fd);
-          }
      } else {
           A(0 > len);
      }
@@ -377,35 +424,20 @@ pipe_write(ep_t *ep)
 }
 
 static int
-pipe_close(struct glue *eg)
+pipe_close(ep_t *ep)
 {
-     printf("*** %s: eg->fd=%d\n", __func__, eg->fd);
+     printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
 
-     A(eg->fd >= 0);
-     A(eg->other);
-     A(eg->on_read == NULL ? eg->on_write != NULL : eg->on_write == NULL);
-     A(eg->buf_in == NULL ? eg->buf_out != NULL : eg->buf_in != NULL);
+     A(ep->fd >= 0);
+     A(ep->read == NULL ? ep->write != NULL : ep->write == NULL);
+     A(ep->rcv_buf == NULL ? ep->snd_buf != NULL : ep->rcv_buf != NULL);
 
-     if (eg->buf_in) {
-          if (0 < buf_len(eg->buf_in))
-               printf("\t%s: lost %d byte(s) in buf_in\n",
-                      __func__,
-                      buf_len(eg->buf_in));
+     AZ(close(ep->fd));
 
-          buf_free(eg->buf_in);
-     }
-
-     if (eg->buf_out) {
-          if (0 < buf_len(eg->buf_out))
-               printf("\t%s: lost %d byte(s) in buf_out\n",
-                      __func__,
-                      buf_len(eg->buf_out));
-
-          buf_free(eg->buf_out);
-     }
-
-     AZ(close(eg->fd));
-     free(eg);
+     if (snd_pipe == ep)
+          init_snd_pipe();
+     else if (rcv_pipe == ep)
+          init_rcv_pipe();
 
      return 0;
 }
