@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/epoll.h>
 #include "wstypes.h"
+#include "hashtable.h"
 
 #define MAX_EVENTS 256
 #define BUF_SIZE 128
@@ -22,20 +24,7 @@
 #define ERRET(exp, text)                        \
      if (exp) { perror(text); return (-1); }
 
-struct glue {
-     unsigned long magic;
-     unsigned long hash;
-     int fd;
-     int (*on_read)(struct glue*);
-     int (*on_write)(struct glue*);
-     int (*on_close)(struct glue*);
-     buf_t *buf_in;
-     buf_t *buf_out;
-     struct glue *other;
-};
-
 struct endpoint {
-     unsigned long magic;
      unsigned long hash;
      char snd_buf[BUF_SIZE];
      char rcv_buf[BUF_SIZE];
@@ -45,20 +34,21 @@ struct endpoint {
      int (*read)(struct endpoint *ep);
      int (*write)(struct endpoint *ep);
      int (*close)(struct endpoint *ep);
-     struct glue *sk;
 };
 typedef struct endpoint ep_t;
 
+static DEFINE_HASHTABLE(ep_hash, 4);
 static const char *snd_pathname = "/tmp/pipe-inbound";
 static const char *rcv_pathname = "/tmp/pipe-outbound";
 
 static int epfd;
 static ep_t *snd_pipe;
 static ep_t *rcv_pipe;
+static ep_t *sk;
 
-static int sock_on_read(struct glue *eg);
-static int sock_on_write(struct glue *eg);
-static int sock_on_close(struct glue *eg);
+static int sock_read(ep_t *ep);
+static int sock_write(ep_t *ep);
+static int sock_close(ep_t *ep);
 static int pipe_write(ep_t *ep);
 static int pipe_read(ep_t *ep);
 static int pipe_close(ep_t *ep);
@@ -80,7 +70,6 @@ hash(struct sockaddr_in *saddr, struct timespec *ts) {
 static void
 init_snd_pipe() {
      memset(snd_pipe, 0, sizeof(ep_t));
-     snd_pipe->magic = 0xcafebabe;
      snd_pipe->fd = -1;
      snd_pipe->write = pipe_write;
      snd_pipe->close = pipe_close;
@@ -89,7 +78,6 @@ init_snd_pipe() {
 static void
 init_rcv_pipe() {
      memset(rcv_pipe, 0, sizeof(ep_t));
-     rcv_pipe->magic = 0xcafebabe;
      rcv_pipe->fd = -1;
      rcv_pipe->read = pipe_read;
      rcv_pipe->close = pipe_close;
@@ -110,7 +98,9 @@ int main(int argc, char **argv)
      rcv_pipe = malloc(sizeof(ep_t));
      A(rcv_pipe);
      init_rcv_pipe();
- 
+
+     hash_init(ep_hash);
+
      int lfd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
      A(lfd >= 0);
 
@@ -152,43 +142,25 @@ int main(int argc, char **argv)
                     continue;
                }
 
-               printf("*** %s: nfd=%d, magic=0x%lx, events=0x%x\n",
+               printf("*** %s: nfd=%d, events=0x%x\n",
                       __func__,
                       nfd,
-                      *(unsigned long*)evs[n].data.ptr,
                       evs[n].events);
 
-               if (0xcafebabe == *(unsigned long*)(evs[n].data.ptr)) {
-                    /* New style */
-                    ep_t *ep = (ep_t*)evs[n].data.ptr;
-                    if (evs[n].events & EPOLLIN ||
-                        evs[n].events & EPOLLPRI) {
-                         int rv = ep->read(ep);
-                         if (0 > rv)
-                              AZ(ep->close(ep));
-                    } else if (evs[n].events & EPOLLOUT) {
-                         int rv = ep->write(ep);
-                         if (0 > rv)
-                              AZ(ep->close(ep));
-                    } else if (evs[n].events & EPOLLHUP ||
-                               evs[n].events & EPOLLRDHUP ||
-                               evs[n].events & EPOLLERR) {
+               ep_t *ep = (ep_t*)evs[n].data.ptr;
+               if (evs[n].events & EPOLLIN ||
+                   evs[n].events & EPOLLPRI) {
+                    int rv = ep->read(ep);
+                    if (0 > rv)
                          AZ(ep->close(ep));
-                    }
-               } else {
-                    struct glue *eg = (struct glue*)evs[n].data.ptr;
-                    if (evs[n].events & EPOLLIN) {
-                         int rv = eg->on_read(eg);
-                         if (0 > rv)
-                              AZ(eg->on_close(eg));
-                    } else if (evs[n].events & EPOLLOUT) {
-                         int rv = eg->on_write(eg);
-                         if (0 > rv)
-                              AZ(eg->on_close(eg));
-                    } else if (evs[n].events & EPOLLHUP ||
-                               evs[n].events & EPOLLRDHUP) {
-                         AZ(eg->on_close(eg));
-                    }
+               } else if (evs[n].events & EPOLLOUT) {
+                    int rv = ep->write(ep);
+                    if (0 > rv)
+                         AZ(ep->close(ep));
+               } else if (evs[n].events & EPOLLHUP ||
+                          evs[n].events & EPOLLRDHUP ||
+                          evs[n].events & EPOLLERR) {
+                    AZ(ep->close(ep));
                }
           }
      }
@@ -212,26 +184,29 @@ on_accept(int lfd)
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
      ev.events = EPOLLIN | EPOLLRDHUP;
-     ev.data.ptr = malloc(sizeof(struct glue));
+     ev.data.ptr = malloc(sizeof(ep_t));
      A(ev.data.ptr);
-     memset(ev.data.ptr, 0, sizeof(struct glue));
-     struct glue *eg = (struct glue*)ev.data.ptr;
-     eg->fd = fd;
-     eg->on_read = sock_on_read;
-     eg->on_write = sock_on_write;
-     eg->on_close = sock_on_close;
-     eg->buf_in = buf_alloc(BUF_SIZE);
-     eg->buf_out = buf_alloc(BUF_SIZE);
+
+     memset(ev.data.ptr, 0, sizeof(ep_t));
+     ep_t *ep = (ep_t*)ev.data.ptr;
+     ep->fd = fd;
+     ep->read = sock_read;
+     ep->write = sock_write;
+     ep->close = sock_close;
+
      struct timespec ts;
      memset((void*)&ts, 0, sizeof(ts));
      AZ(clock_gettime(CLOCK_REALTIME_COARSE, &ts));
-     eg->hash = hash(&saddr, &ts);
+     ep->hash = hash(&saddr, &ts);
      AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
 
      printf("*** %s: eg->fd=%d, hash=0x%lx\n",
             __func__,
             fd,
-            eg->hash);
+            ep->hash);
+
+     //TODO Unlink and replace with lookup!
+     sk = ep;
 
      return 0;
 }
@@ -252,31 +227,27 @@ pipe_read(ep_t *ep)
      ep->rpos = len;
 
      //TODO Lookup socket!
-     int k = 0;
-     while (0 < buf_len(ep->sk->buf_out) && k < ep->rpos)
-          buf_put(ep->sk->buf_out, ep->rcv_buf[k++]);
-     
-     buf_flip(ep->sk->buf_out);
-
-     AZ(k - ep->rpos);
-     ep->rpos = 0;
+     int n = ep->rpos;
+     while (sk->spos < sizeof(sk->snd_buf) && ep->rpos > 0)
+          sk->snd_buf[sk->spos++] = ep->rcv_buf[n - ep->rpos--];
+     AZ(ep->rpos);
 
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
      ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
-     ev.data.ptr = ep->sk;
+     ev.data.ptr = sk;
 
-     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->sk->fd, &ev));
+     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, sk->fd, &ev));
 
      return 0;
 }
 
 static int
-sock_on_read(struct glue *eg)
+sock_read(ep_t *ep)
 {
-     printf("*** %s: eg->fd=%d\n", __func__, eg->fd);
+     printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
 
-     int len = read(eg->fd, buf_ref(eg->buf_in), buf_len(eg->buf_in));
+     int len = read(ep->fd, ep->rcv_buf, sizeof ep->rcv_buf);
      ERRET(0 > len, "read");
 
      /* EOF */
@@ -285,8 +256,7 @@ sock_on_read(struct glue *eg)
 
      printf("\t%s: read %d byte(s)\n", __func__, len);
 
-     buf_fwd(eg->buf_in, len);
-     buf_flip(eg->buf_in);
+     ep->rpos = len;
 
      if (-1 == snd_pipe->fd) {
           int rv = mkfifo(snd_pathname, 0600);
@@ -301,9 +271,12 @@ sock_on_read(struct glue *eg)
 
           printf("\t%s: opened %s\n", __func__, snd_pathname);
 
+          int n = ep->rpos;
           while (snd_pipe->spos < sizeof(snd_pipe->snd_buf) &&
-                 0 < buf_len(eg->buf_in))
-               snd_pipe->snd_buf[snd_pipe->spos++] = buf_get(eg->buf_in);
+                 ep->rpos > 0)
+               snd_pipe->snd_buf[snd_pipe->spos++] =
+                    ep->rcv_buf[n - ep->rpos--];
+          AZ(ep->rpos);
 
           struct epoll_event ev;
           memset(&ev, 0, sizeof(ev));
@@ -326,12 +299,13 @@ sock_on_read(struct glue *eg)
           ev.events = EPOLLIN;
           ev.data.ptr = rcv_pipe;
           AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, rcv_pipe->fd, &ev));
-
-          //TODO Unlink and replace with lookup!
-          rcv_pipe->sk = eg;
      } else {
-          while (snd_pipe->spos < sizeof(snd_pipe->snd_buf))
-               snd_pipe->snd_buf[snd_pipe->spos++] = buf_get(eg->buf_in);
+          int n = ep->rpos;
+          while (snd_pipe->spos < sizeof(snd_pipe->snd_buf) &&
+                 ep->rpos > 0)
+               snd_pipe->snd_buf[snd_pipe->spos++] =
+                    ep->rcv_buf[n - ep->rpos--];
+          AZ(ep->rpos);
 
           struct epoll_event ev;
           memset(&ev, 0, sizeof(ev));
@@ -340,37 +314,33 @@ sock_on_read(struct glue *eg)
           AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, snd_pipe->fd, &ev));
      }
 
-     buf_compact(eg->buf_in);
-
      return 0;
 }
 
 static int
-sock_on_write(struct glue *eg)
+sock_write(ep_t *ep)
 {
-     printf("*** %s: eg->fd=%d\n", __func__, eg->fd);
+     printf("*** %s: ep->fd=%d, ep->spos=%d\n", __func__, ep->fd, ep->spos);
 
-     A(eg->fd >= 0);
-     A(eg->buf_out);
-     A(buf_len(eg->buf_out) > 0);
-     int len = write(eg->fd, buf_ref(eg->buf_out), buf_len(eg->buf_out));
+     A(ep->fd >= 0);
+     A(ep->spos > 0);
+     int len = write(ep->fd, ep->snd_buf, ep->spos);
      if (0 < len) {
           printf("\t%s: wrote %d byte(s)\n", __func__, len);
 
-          buf_fwd(eg->buf_out, len);
-          buf_compact(eg->buf_out);
-          A(BUF_SIZE == buf_len(eg->buf_out));
+          ep->spos -= len;
+          AZ(ep->spos);
 
-          if (BUF_SIZE == buf_len(eg->buf_out)) {
+          if (0 == ep->spos) {
                struct epoll_event ev;
                memset(&ev, 0, sizeof(ev));
                ev.events = EPOLLIN | EPOLLRDHUP;
-               ev.data.ptr = eg;
-               AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, eg->fd, &ev));
+               ev.data.ptr = ep;
+               AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
 
-               printf("\t%s: removing EPOLLOUT: fd=%d\n",
+               printf("\t%s: removing EPOLLOUT: ep->fd=%d\n",
                       __func__,
-                      eg->fd);
+                      ep->fd);
           }
      } else {
           A(0 > len);
@@ -379,35 +349,22 @@ sock_on_write(struct glue *eg)
      return len;
 }
 
-static int sock_on_close(struct glue *eg)
+static int sock_close(ep_t *ep)
 {
-     printf("*** %s: eg->fd=%d\n", __func__, eg->fd);
+     printf("*** %s: ep->fd=%d, ep->spos=%d\n", __func__, ep->fd, ep->spos);
 
-     A(eg->fd >= 0);
-     A(eg->on_read != NULL);
-     A(eg->on_write != NULL);
-     A(eg->buf_in != NULL);
+     A(ep->hash != 0L);
+     A(ep->fd >= 0);
+     AZ(ep->rpos);
+     AZ(ep->spos);
+     A(ep->close != NULL);
+     A(ep->read != NULL);
+     A(ep->write != NULL);
+     AZ(close(ep->fd));
 
-     if (0 < buf_len(eg->buf_in))
-          printf("\t%s: lost %d byte(s) in buf_in\n",
-                 __func__,
-                 buf_len(eg->buf_in));
+     free(ep);
 
-     A(eg->buf_out != NULL);
-
-     if (0 < buf_len(eg->buf_out))
-          printf("\t%s: lost %d byte(s) in buf_out\n",
-                 __func__,
-                 buf_len(eg->buf_out));
-
-     AZ(close(eg->fd));
-     buf_free(eg->buf_in);
-     buf_free(eg->buf_out);
-
-     if (eg->other)
-          AZ(eg->other->on_close(eg->other));
-
-     free(eg);
+     sk = NULL;
 
      return 0;
 }
