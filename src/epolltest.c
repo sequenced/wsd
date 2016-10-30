@@ -25,7 +25,7 @@
      if (exp) { perror(text); return (-1); }
 
 struct endpoint {
-     unsigned long hash;
+     long unsigned int hash;
      char snd_buf[BUF_SIZE];
      char rcv_buf[BUF_SIZE];
      int spos;
@@ -34,6 +34,7 @@ struct endpoint {
      int (*read)(struct endpoint *ep);
      int (*write)(struct endpoint *ep);
      int (*close)(struct endpoint *ep);
+     struct hlist_node hash_node;
 };
 typedef struct endpoint ep_t;
 
@@ -44,7 +45,6 @@ static const char *rcv_pathname = "/tmp/pipe-outbound";
 static int epfd;
 static ep_t *snd_pipe;
 static ep_t *rcv_pipe;
-static ep_t *sk;
 
 static int sock_read(ep_t *ep);
 static int sock_write(ep_t *ep);
@@ -55,11 +55,11 @@ static int pipe_close(ep_t *ep);
 static int on_accept(int lfd);
 static void init_snd_pipe();
 static void init_rcv_pipe();
-static unsigned long hash(struct sockaddr_in *saddr, struct timespec *ts);
+static long unsigned int hash(struct sockaddr_in *saddr, struct timespec *ts);
 
-static unsigned long
+static long unsigned int
 hash(struct sockaddr_in *saddr, struct timespec *ts) {
-     unsigned long h = saddr->sin_addr.s_addr;
+     long unsigned int h = saddr->sin_addr.s_addr;
      h = h << 16;
      h |= saddr->sin_port;
      h = h << 16;
@@ -100,6 +100,10 @@ int main(int argc, char **argv)
      init_rcv_pipe();
 
      hash_init(ep_hash);
+
+     printf("*** %s: endpoint hashtable has %lu entries\n",
+            __func__,
+            sizeof ep_hash);
 
      int lfd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
      A(lfd >= 0);
@@ -205,9 +209,6 @@ on_accept(int lfd)
             fd,
             ep->hash);
 
-     //TODO Unlink and replace with lookup!
-     sk = ep;
-
      return 0;
 }
 
@@ -216,6 +217,7 @@ pipe_read(ep_t *ep)
 {
      printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
 
+     AZ(ep->rpos);
      int len = read(ep->fd, ep->rcv_buf, sizeof ep->rcv_buf);
      printf("\t%s: len=%d\n", __func__, len);
      ERRET(0 > len, "read");
@@ -226,18 +228,34 @@ pipe_read(ep_t *ep)
 
      ep->rpos = len;
 
-     //TODO Lookup socket!
+     const long unsigned int hash = *(long unsigned int*)(ep->rcv_buf);
+     A(hash != 0);
+     ep_t *sock = NULL;
+     hash_for_each_possible(ep_hash, sock, hash_node, hash) {
+          if (sock->hash == hash)
+               break;
+     }
+
+     if (NULL == sock) {
+          printf("\tsocket went way: dropping %d byte(s)\n", ep->rpos);
+          /* Socket went away; drop data on the floor */
+          ep->rpos = 0;
+
+          return 0;
+     }
+
      int n = ep->rpos;
-     while (sk->spos < sizeof(sk->snd_buf) && ep->rpos > 0)
-          sk->snd_buf[sk->spos++] = ep->rcv_buf[n - ep->rpos--];
+     while (sock->spos < sizeof(sock->snd_buf) && ep->rpos > 0)
+          sock->snd_buf[sock->spos++] =
+               ep->rcv_buf[sizeof(long unsigned int) + n - ep->rpos--];
      AZ(ep->rpos);
 
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
      ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
-     ev.data.ptr = sk;
+     ev.data.ptr = sock;
 
-     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, sk->fd, &ev));
+     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, sock->fd, &ev));
 
      return 0;
 }
@@ -271,13 +289,6 @@ sock_read(ep_t *ep)
 
           printf("\t%s: opened %s\n", __func__, snd_pathname);
 
-          int n = ep->rpos;
-          while (snd_pipe->spos < sizeof(snd_pipe->snd_buf) &&
-                 ep->rpos > 0)
-               snd_pipe->snd_buf[snd_pipe->spos++] =
-                    ep->rcv_buf[n - ep->rpos--];
-          AZ(ep->rpos);
-
           struct epoll_event ev;
           memset(&ev, 0, sizeof(ev));
           ev.events = EPOLLOUT | EPOLLRDHUP;
@@ -299,20 +310,26 @@ sock_read(ep_t *ep)
           ev.events = EPOLLIN;
           ev.data.ptr = rcv_pipe;
           AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, rcv_pipe->fd, &ev));
-     } else {
-          int n = ep->rpos;
-          while (snd_pipe->spos < sizeof(snd_pipe->snd_buf) &&
-                 ep->rpos > 0)
-               snd_pipe->snd_buf[snd_pipe->spos++] =
-                    ep->rcv_buf[n - ep->rpos--];
-          AZ(ep->rpos);
-
-          struct epoll_event ev;
-          memset(&ev, 0, sizeof(ev));
-          ev.events = EPOLLOUT | EPOLLRDHUP;
-          ev.data.ptr = snd_pipe;
-          AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, snd_pipe->fd, &ev));
      }
+
+     A(snd_pipe->spos < (sizeof snd_pipe->snd_buf - sizeof(long unsigned int)));
+     *(long unsigned int*)(&snd_pipe->snd_buf[snd_pipe->spos]) = ep->hash;
+     snd_pipe->spos += sizeof(long unsigned int);
+     
+     int n = ep->rpos;
+     while (snd_pipe->spos < sizeof(snd_pipe->snd_buf) &&
+            ep->rpos > 0)
+          snd_pipe->snd_buf[snd_pipe->spos++] =
+               ep->rcv_buf[n - ep->rpos--];
+     AZ(ep->rpos);
+
+     struct epoll_event ev;
+     memset(&ev, 0, sizeof(ev));
+     ev.events = EPOLLOUT | EPOLLRDHUP;
+     ev.data.ptr = snd_pipe;
+     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, snd_pipe->fd, &ev));
+
+     hash_add(ep_hash, &ep->hash_node, ep->hash);
 
      return 0;
 }
@@ -362,9 +379,14 @@ static int sock_close(ep_t *ep)
      A(ep->write != NULL);
      AZ(close(ep->fd));
 
-     free(ep);
+     if (hash_hashed(&ep->hash_node)) {
+          printf("\t %s: removing ep->fd=%d from hashtable\n",
+                 __func__,
+                 ep->fd);
+          hash_del(&ep->hash_node);
+     }
 
-     sk = NULL;
+     free(ep);
 
      return 0;
 }
