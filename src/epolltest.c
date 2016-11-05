@@ -24,12 +24,26 @@
 #define ERRET(exp, text)                        \
      if (exp) { perror(text); return (-1); }
 
+#define buf_read_sz(buf) (buf.wrpos - buf.rdpos)
+#define buf_write_sz(buf) ((unsigned int)sizeof(buf.p) - buf.wrpos)
+#define buf_reset(buf) buf.wrpos = 0; buf.rdpos = 0;
+#define buf_put(buf, obj)                           \
+     *(typeof(obj)*)(&buf.p[buf.wrpos]) = obj;  \
+     buf.wrpos += sizeof(typeof(obj));
+#define buf_get(buf, obj)                           \
+     obj = *(typeof(obj)*)(&buf.p[buf.rdpos]);  \
+     buf.rdpos += sizeof(typeof(obj));
+
+typedef struct {
+     char p[BUF_SIZE];
+     unsigned int rdpos;
+     unsigned int wrpos;
+} buf2_t;
+
 struct endpoint {
      long unsigned int hash;
-     char snd_buf[BUF_SIZE];
-     char rcv_buf[BUF_SIZE];
-     int spos;
-     int rpos;
+     buf2_t snd_buf;
+     buf2_t rcv_buf;
      int fd;
      int (*read)(struct endpoint *ep);
      int (*write)(struct endpoint *ep);
@@ -217,8 +231,8 @@ pipe_read(ep_t *ep)
 {
      printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
 
-     AZ(ep->rpos);
-     int len = read(ep->fd, ep->rcv_buf, sizeof ep->rcv_buf);
+     AZ(ep->rcv_buf.wrpos);
+     int len = read(ep->fd, ep->rcv_buf.p, buf_write_sz(ep->rcv_buf));
      printf("\t%s: len=%d\n", __func__, len);
      ERRET(0 > len, "read");
 
@@ -226,9 +240,10 @@ pipe_read(ep_t *ep)
      if (0 == len)
           return (-1);
 
-     ep->rpos = len;
+     ep->rcv_buf.wrpos += len;
 
-     const long unsigned int hash = *(long unsigned int*)(ep->rcv_buf);
+     long unsigned int hash;
+     buf_get(ep->rcv_buf, hash);
      A(hash != 0);
      ep_t *sock = NULL;
      hash_for_each_possible(ep_hash, sock, hash_node, hash) {
@@ -237,18 +252,19 @@ pipe_read(ep_t *ep)
      }
 
      if (NULL == sock) {
-          printf("\tsocket went way: dropping %d byte(s)\n", ep->rpos);
+          printf("\tsocket went way: dropping %d byte(s)\n",
+                 buf_read_sz(ep->rcv_buf));
           /* Socket went away; drop data on the floor */
-          ep->rpos = 0;
+          buf_reset(ep->rcv_buf);
 
           return 0;
      }
 
-     int n = ep->rpos;
-     while (sock->spos < sizeof(sock->snd_buf) && ep->rpos > 0)
-          sock->snd_buf[sock->spos++] =
-               ep->rcv_buf[sizeof(long unsigned int) + n - ep->rpos--];
-     AZ(ep->rpos);
+     while (buf_write_sz(sock->snd_buf) && buf_read_sz(ep->rcv_buf))
+          sock->snd_buf.p[sock->snd_buf.wrpos++] =
+               ep->rcv_buf.p[ep->rcv_buf.rdpos++];
+     AZ(buf_read_sz(ep->rcv_buf));
+     buf_reset(ep->rcv_buf);
 
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
@@ -265,7 +281,8 @@ sock_read(ep_t *ep)
 {
      printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
 
-     int len = read(ep->fd, ep->rcv_buf, sizeof ep->rcv_buf);
+     AZ(ep->rcv_buf.wrpos);
+     int len = read(ep->fd, ep->rcv_buf.p, buf_write_sz(ep->rcv_buf));
      ERRET(0 > len, "read");
 
      /* EOF */
@@ -274,7 +291,7 @@ sock_read(ep_t *ep)
 
      printf("\t%s: read %d byte(s)\n", __func__, len);
 
-     ep->rpos = len;
+     ep->rcv_buf.wrpos += len;
 
      if (-1 == snd_pipe->fd) {
           int rv = mkfifo(snd_pathname, 0600);
@@ -312,16 +329,21 @@ sock_read(ep_t *ep)
           AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, rcv_pipe->fd, &ev));
      }
 
-     A(snd_pipe->spos < (sizeof snd_pipe->snd_buf - sizeof(long unsigned int)));
-     *(long unsigned int*)(&snd_pipe->snd_buf[snd_pipe->spos]) = ep->hash;
-     snd_pipe->spos += sizeof(long unsigned int);
+     // TODO plug in protocol handler
+     A(buf_write_sz(snd_pipe->snd_buf) > sizeof(long unsigned int));
+     buf_put(snd_pipe->snd_buf, ep->hash);
      
-     int n = ep->rpos;
-     while (snd_pipe->spos < sizeof(snd_pipe->snd_buf) &&
-            ep->rpos > 0)
-          snd_pipe->snd_buf[snd_pipe->spos++] =
-               ep->rcv_buf[n - ep->rpos--];
-     AZ(ep->rpos);
+     while (buf_write_sz(snd_pipe->snd_buf) && buf_read_sz(ep->rcv_buf))
+          snd_pipe->snd_buf.p[snd_pipe->snd_buf.wrpos++] =
+               ep->rcv_buf.p[ep->rcv_buf.rdpos++];
+
+     printf("\t%s: ep->rcv_buf.rdpos=%d, snd_pipe->snd_buf.wrpos=%d\n",
+            __func__,
+            ep->rcv_buf.rdpos,
+            snd_pipe->snd_buf.wrpos);
+     
+     AZ(buf_read_sz(ep->rcv_buf));
+     buf_reset(ep->rcv_buf);
 
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
@@ -337,18 +359,22 @@ sock_read(ep_t *ep)
 static int
 sock_write(ep_t *ep)
 {
-     printf("*** %s: ep->fd=%d, ep->spos=%d\n", __func__, ep->fd, ep->spos);
+     printf("*** %s: ep->fd=%d, ep->snd_buf.rdpos=%d\n",
+            __func__,
+            ep->fd,
+            ep->snd_buf.rdpos);
 
      A(ep->fd >= 0);
-     A(ep->spos > 0);
-     int len = write(ep->fd, ep->snd_buf, ep->spos);
+     A(buf_read_sz(ep->snd_buf) > 0);
+     int len = write(ep->fd, ep->snd_buf.p, buf_read_sz(ep->snd_buf));
      if (0 < len) {
           printf("\t%s: wrote %d byte(s)\n", __func__, len);
 
-          ep->spos -= len;
-          AZ(ep->spos);
+          ep->snd_buf.rdpos += len;
+          AZ(buf_read_sz(ep->snd_buf));
+          buf_reset(ep->snd_buf);
 
-          if (0 == ep->spos) {
+          if (0 == ep->snd_buf.rdpos) {
                struct epoll_event ev;
                memset(&ev, 0, sizeof(ev));
                ev.events = EPOLLIN | EPOLLRDHUP;
@@ -368,12 +394,14 @@ sock_write(ep_t *ep)
 
 static int sock_close(ep_t *ep)
 {
-     printf("*** %s: ep->fd=%d, ep->spos=%d\n", __func__, ep->fd, ep->spos);
+     printf("*** %s: ep->fd=%d, read_sz=%u, write_sz=%u\n",
+            __func__,
+            ep->fd,
+            buf_read_sz(ep->rcv_buf),
+            buf_write_sz(ep->snd_buf));
 
      A(ep->hash != 0L);
      A(ep->fd >= 0);
-     AZ(ep->rpos);
-     AZ(ep->spos);
      A(ep->close != NULL);
      A(ep->read != NULL);
      A(ep->write != NULL);
@@ -397,14 +425,15 @@ pipe_write(ep_t *ep)
      printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
 
      A(ep->fd >= 0);
-     A(ep->snd_buf);
-     A(ep->spos > 0);
-     int len = write(ep->fd, ep->snd_buf, ep->spos);
+     A(ep->snd_buf.p);
+     A(buf_read_sz(ep->snd_buf) > 0);
+     int len = write(ep->fd, ep->snd_buf.p, buf_read_sz(ep->snd_buf));
      if (0 < len) {
           printf("\t%s: wrote %d byte(s)\n", __func__, len);
 
-          A(len == ep->spos);
-          ep->spos = 0;
+          ep->snd_buf.rdpos += len;
+          AZ(buf_read_sz(ep->snd_buf));
+          buf_reset(ep->snd_buf);
 
           struct epoll_event ev;
           memset(&ev, 0, sizeof(ev));
@@ -429,7 +458,7 @@ pipe_close(ep_t *ep)
 
      A(ep->fd >= 0);
      A(ep->read == NULL ? ep->write != NULL : ep->write == NULL);
-     A(ep->rcv_buf == NULL ? ep->snd_buf != NULL : ep->rcv_buf != NULL);
+     A(ep->rcv_buf.p == NULL ? ep->snd_buf.p != NULL : ep->rcv_buf.p != NULL);
 
      AZ(close(ep->fd));
 
