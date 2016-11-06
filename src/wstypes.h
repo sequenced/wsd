@@ -12,13 +12,34 @@
      if (!((exp) != 0)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
 #define A(exp)                                                          \
      if (!(exp)) { ALERT(__func__, __FILE__, __LINE__); exit(1); }
+#define ERRET(exp, text)                        \
+     if (exp) { perror(text); return (-1); }
+#define ERREXIT(exp, text)                       \
+     if (exp) { perror(text); exit(1); }
 
-#define HASH32_TABLE_SIZE  256
-#define HASH_ENTRY_BUCKETS 8
-#define UNASSIGNED         (-1)
-#define LOG_VVVERBOSE       3
-#define LOG_VVERBOSE        2
-#define HTTP_500 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
+#define BUF_SIZE      128
+#define UNASSIGNED    (-1)
+#define LOG_VVVERBOSE 3
+#define LOG_VVERBOSE  2
+#define HTTP_500      "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
+
+typedef struct {
+     char p[BUF_SIZE];
+     unsigned int rdpos;
+     unsigned int wrpos;
+} buf2_t;
+
+struct endpoint {
+     long unsigned int hash;
+     buf2_t snd_buf;
+     buf2_t rcv_buf;
+     int fd;
+     int (*read)(struct endpoint *ep);
+     int (*write)(struct endpoint *ep);
+     int (*close)(struct endpoint *ep);
+     struct hlist_node hash_node;
+};
+typedef struct endpoint ep_t;
 
 typedef struct
 {
@@ -87,11 +108,6 @@ struct wsconn
 };
 typedef struct wsconn wsconn_t;
 
-struct epoll_glue {
-     int fd;
-     wsconn_t *conn;
-};
-
 typedef struct
 {
      uid_t uid;
@@ -99,7 +115,6 @@ typedef struct
      char *hostname;
      int lfd;
      int port;
-     int epfd;
      int verbose;
      int no_fork;
      int (*register_user_fd)(int fd,
@@ -147,26 +162,5 @@ void buf_set_pos(buf_t *b, int pos);
 char* buf_flip(buf_t *b);
 void buf_compact(buf_t *b);
 void buf_slice(buf_t *a, buf_t *b, int len);
-
-typedef struct
-{
-     void *data;
-     int key;
-} bucket32_t;
-
-typedef struct
-{
-     bucket32_t buckets[HASH_ENTRY_BUCKETS];
-} hash_table_entry32_t;
-
-typedef struct
-{
-     unsigned int (*hash)(int val);
-     hash_table_entry32_t entries[HASH32_TABLE_SIZE];
-} hash32_table_t;
-
-void *hash32_table_lookup(hash32_table_t *t, int key);
-int hash32_table_insert(hash32_table_t *t, int key, void *data);
-unsigned int hash32_table_hash(int val);
 
 #endif /* #ifndef __WSTYPES_H__ */

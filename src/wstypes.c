@@ -251,52 +251,6 @@ buf_put_string(buf_t *b, const char *s)
 }
 
 void
-*hash32_table_lookup(hash32_table_t *t, int key)
-{
-  unsigned int k=t->hash(key);
-
-  int i;
-  for (i=0; i<HASH_ENTRY_BUCKETS; i++)
-    if (key==t->entries[k].buckets[i].key)
-      break;
-
-  return t->entries[k].buckets[i].data;
-}
-
-int
-hash32_table_insert(hash32_table_t *t, int key, void *data)
-{
-  int rv=0;
-  unsigned int k=t->hash(key);
-
-  int i;
-  for (i=0; i<HASH_ENTRY_BUCKETS; i++)
-    if (0==t->entries[k].buckets[i].key
-        || key==t->entries[k].buckets[i].key)
-      break;
-
-  if (i!=HASH_ENTRY_BUCKETS-1)
-    {
-      t->entries[k].buckets[i].data=data;
-      t->entries[k].buckets[i].key=key;
-    }
-  else
-    /* HASH_ENTRY_BUCKETS-1 serves as end marker */
-    rv=-1;
-
-  return rv;
-}
-
-unsigned int
-hash32_table_hash(int val)
-{
-  /* Use same function as Apache httpd 2.4.7 */
-  unsigned int v=val;
-  v^=(v>>16);
-  return ((v>>8)^v)&HASH32_TABLE_SIZE;
-}
-
-void
 buf_put_buf(buf_t *dst, buf_t *src)
 {
      while (buf_len(dst) && buf_len(src))

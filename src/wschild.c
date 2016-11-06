@@ -1,121 +1,177 @@
 #define _GNU_SOURCE
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/epoll.h>
-#include <syslog.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
 #include <time.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/epoll.h>
 #include "wstypes.h"
-#include "http.h"
-#include "ws.h"
+#include "hashtable.h"
 
 #define MAX_EVENTS 256
-#define BUF_SIZE 8192
-#define DEFAULT_QUANTUM (5000)
+#define DEFAULT_QUANTUM 5000
 
-#define log_addr(msg, func, addr, fd)                                   \
-     printf(msg, func, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), fd);
+#define ERRET(exp, text)                        \
+     if (exp) { perror(text); return (-1); }
+
+#define buf_read_sz(buf) (buf.wrpos - buf.rdpos)
+#define buf_write_sz(buf) ((unsigned int)sizeof(buf.p) - buf.wrpos)
+#define buf_reset(buf) buf.wrpos = 0; buf.rdpos = 0;
+#define buf_put(buf, obj)                       \
+     *(typeof(obj)*)(&buf.p[buf.wrpos]) = obj;  \
+     buf.wrpos += sizeof(typeof(obj));
+#define buf_get(buf, obj)                       \
+     obj = *(typeof(obj)*)(&buf.p[buf.rdpos]);  \
+     buf.rdpos += sizeof(typeof(obj));
 
 const wsd_config_t *wsd_cfg = NULL;
 
-/* forward declarations */
-static int on_accept(int fd);
-static int on_read(struct epoll_glue *eg);
-static int on_write(wsconn_t *conn);
-static void cleanup(struct epoll_event *ev);
-static void on_close(wsconn_t *conn);
+static const char *snd_pathname = "/tmp/pipe-inbound";
+static const char *rcv_pathname = "/tmp/pipe-outbound";
+
+static DEFINE_HASHTABLE(ep_hash, 4);
+static int epfd;
+static ep_t *snd_pipe;
+static ep_t *rcv_pipe;
+
+static int sock_read(ep_t *ep);
+static int sock_write(ep_t *ep);
+static int sock_close(ep_t *ep);
+static int pipe_write(ep_t *ep);
+static int pipe_read(ep_t *ep);
+static int pipe_close(ep_t *ep);
+static int on_accept(int lfd);
+static void init_snd_pipe();
+static void init_rcv_pipe();
+static long unsigned int hash(struct sockaddr_in *saddr, struct timespec *ts);
 static int io_loop();
 static void sigterm(int sig);
-static unsigned long hash(struct sockaddr_in *saddr, struct timespec *ts);
 
 int
 wschild_main(const wsd_config_t *cfg)
 {
      wsd_cfg = cfg;
 
-     struct sigaction act;
-     memset(&act, 0x0, sizeof(struct sigaction));
-     act.sa_handler = sigterm;
-     AZ(sigaction(SIGTERM, &act, NULL));
+     struct sigaction sac;
+     memset(&sac, 0x0, sizeof(struct sigaction));
+     sac.sa_handler = sigterm;
+     AZ(sigaction(SIGTERM, &sac, NULL));
+
+     memset(&sac, 0, sizeof(sac));
+     sac.sa_handler = SIG_IGN;
+     sac.sa_flags = SA_RESTART;
+     AZ(sigaction(SIGPIPE, &sac, NULL));
+
+     snd_pipe = malloc(sizeof(ep_t));
+     A(snd_pipe);
+     init_snd_pipe();
+
+     rcv_pipe = malloc(sizeof(ep_t));
+     A(rcv_pipe);
+     init_rcv_pipe();
+
+     hash_init(ep_hash);
+     printf("*** %s: endpoint hashtable has %lu entries\n",
+            __func__,
+            sizeof ep_hash);
+
+     epfd = epoll_create(1);
+     A(epfd >= 0);
 
      AZ(listen(wsd_cfg->lfd, 5));
+
+     struct epoll_event ev;
+     memset((void*)&ev, 0, sizeof(ev));
+     ev.events = EPOLLIN;
+     ev.data.fd = wsd_cfg->lfd;
+     AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, wsd_cfg->lfd, &ev));
 
      return io_loop();
 }
 
-static int
-io_loop()
+static long unsigned int
+hash(struct sockaddr_in *saddr, struct timespec *ts) {
+     long unsigned int h = saddr->sin_addr.s_addr;
+     h <<= 16;
+     h |= saddr->sin_port;
+     h <<= 16;
+     h |= ((ts->tv_nsec &0x00000000ffff0000 >> 16));
+     return h;
+}
+
+static void
+init_snd_pipe() {
+     memset(snd_pipe, 0, sizeof(ep_t));
+     snd_pipe->fd = -1;
+     snd_pipe->write = pipe_write;
+     snd_pipe->close = pipe_close;
+}
+
+static void
+init_rcv_pipe() {
+     memset(rcv_pipe, 0, sizeof(ep_t));
+     rcv_pipe->fd = -1;
+     rcv_pipe->read = pipe_read;
+     rcv_pipe->close = pipe_close;
+}
+
+static void
+sigterm(int sig)
 {
+     /* TODO */
+}
+
+static int
+io_loop() {
      struct epoll_event evs[MAX_EVENTS];
      memset((void*)&evs, 0, sizeof(evs));
 
-     struct epoll_event ev;
-     memset((void*)&ev, 0, sizeof(ev));
-
-     ev.events = EPOLLIN;
-     ev.data.fd = wsd_cfg->lfd;
-     AZ(epoll_ctl(wsd_cfg->epfd, EPOLL_CTL_ADD, wsd_cfg->lfd, &ev));
-
      while (1) {
-          int nfd = epoll_wait(wsd_cfg->epfd, evs, MAX_EVENTS, DEFAULT_QUANTUM);
+          int nfd = epoll_wait(epfd, evs, MAX_EVENTS, DEFAULT_QUANTUM);
           A(nfd >= 0);
           A(nfd <= MAX_EVENTS);
 
           int n;
           for (n = 0; n < nfd; ++n) {
+
                if (evs[n].data.fd == wsd_cfg->lfd) {
                     AZ(on_accept(evs[n].data.fd));
-               } else if (evs[n].events & EPOLLIN) {
-                    struct epoll_glue *eg = (struct epoll_glue*)evs[n].data.ptr;
-                    int rv = on_read(eg);
-                    if (0 >= rv) {
-                         cleanup(&evs[n]);
-                    } else if (conn->write) {
-                         evs[n].events |= EPOLLOUT;
-                         conn->write = 0;
-                         AZ(epoll_ctl(wsd_cfg->epfd,
-                                      EPOLL_CTL_MOD,
-                                      conn->fd,
-                                      &evs[n]));
-                    }
+                    continue;
+               }
+
+               printf("*** %s: nfd=%d, events=0x%x\n",
+                      __func__,
+                      nfd,
+                      evs[n].events);
+
+               ep_t *ep = (ep_t*)evs[n].data.ptr;
+               if (evs[n].events & EPOLLIN ||
+                   evs[n].events & EPOLLPRI) {
+                    int rv = ep->read(ep);
+                    if (0 > rv)
+                         AZ(ep->close(ep));
                } else if (evs[n].events & EPOLLOUT) {
-                    wsconn_t *conn = (wsconn_t*)evs[n].data.ptr;
-                    int rv = on_write(conn);
-                    if (0 > rv || conn->close_on_write) {
-                         cleanup(&evs[n]);
-                    } else if (0 == rv) {
-                         evs[n].events &= ~EPOLLOUT;
-                         AZ(epoll_ctl(wsd_cfg->epfd,
-                                      EPOLL_CTL_MOD,
-                                      conn->fd,
-                                      &evs[n]));
-                    }
-               } else if (evs[n].events & EPOLLERR ||
-                          evs[n].events & EPOLLHUP ||
-                          evs[n].events & EPOLLRDHUP) {
-                    cleanup(&evs[n]);
+                    int rv = ep->write(ep);
+                    if (0 > rv)
+                         AZ(ep->close(ep));
+               } else if (evs[n].events & EPOLLHUP ||
+                          evs[n].events & EPOLLRDHUP ||
+                          evs[n].events & EPOLLERR) {
+                    AZ(ep->close(ep));
                }
           }
      }
 
      return 0;
-}
-
-static void
-cleanup(struct epoll_event *ev)
-{
-     printf("wschild: %s: fd=%d\n", __func__,
-            ((wsconn_t*)ev->data.ptr)->fd);
-
-     AZ(close(((wsconn_t*)ev->data.ptr)->fd));
-     free(ev->data.ptr);
 }
 
 static int
@@ -132,152 +188,267 @@ on_accept(int lfd)
      A(fd >= 0);
 
      struct epoll_event ev;
-     memset((void*)&ev, 0, sizeof(ev));
-
+     memset(&ev, 0, sizeof(ev));
      ev.events = EPOLLIN | EPOLLRDHUP;
-     ev.data.ptr = malloc(sizeof(struct epoll_glue));
+     ev.data.ptr = malloc(sizeof(ep_t));
      A(ev.data.ptr);
-     struct epoll_glue *eg = (struct epoll_glue*)ev.data.ptr;
-     eg->fd = fd;
-     eg->conn = malloc(sizeof(wsconn_t));
-     A(eg->conn);
 
-     memset(eg->conn, 0, sizeof(wsconn_t));
-     wsconn_t *conn = eg->conn;
-
-     conn->sfd = fd;
-     conn->pfd_in = -1;
-     conn->pfd_out = -1;
-     conn->on_read = http_on_read;
-     conn->on_handshake = ws_on_handshake;
-     conn->buf_in = buf_alloc(8192);
-     conn->buf_out = buf_alloc(8192);
+     memset(ev.data.ptr, 0, sizeof(ep_t));
+     ep_t *ep = (ep_t*)ev.data.ptr;
+     ep->fd = fd;
+     ep->read = sock_read;
+     ep->write = sock_write;
+     ep->close = sock_close;
 
      struct timespec ts;
      memset((void*)&ts, 0, sizeof(ts));
      AZ(clock_gettime(CLOCK_REALTIME_COARSE, &ts));
-     conn->hash = hash(&saddr, &ts);
+     ep->hash = hash(&saddr, &ts);
+     AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
 
-     AZ(epoll_ctl(wsd_cfg->epfd, EPOLL_CTL_ADD, fd, &ev));
-
-     if (wsd_cfg->verbose) {
-          log_addr("wschild: %s: %s:%d, fd=%d\n", __func__, saddr, fd);
-     }
+     printf("*** %s: eg->fd=%d, hash=0x%lx\n",
+            __func__,
+            fd,
+            ep->hash);
 
      return 0;
 }
 
-static unsigned long
-hash(struct sockaddr_in *saddr, struct timespec *ts) {
-     unsigned long h = saddr->sin_addr.s_addr;
-     h = h << 16;
-     h |= saddr->sin_port;
-     h = h << 16;
-     h |= ((ts->tv_nsec &0x00000000ffff0000 >> 16));
-     return h;
-}
-
 static int
-on_read(struct epoll_glue *eg)
+pipe_read(ep_t *ep)
 {
-     return eg->conn->on_read(eg->fd, eg->conn);
-/*     if (eg->fd == eg->conn->sfd
-     int len = read(conn->fd,
-                    buf_ref(conn->buf_in),
-                    buf_len(conn->buf_in));
+     printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
 
-     if (0 < len) {
-          buf_fwd(conn->buf_in, len);
-          return conn->on_read(conn);
+     AZ(ep->rcv_buf.wrpos);
+     int len = read(ep->fd, ep->rcv_buf.p, buf_write_sz(ep->rcv_buf));
+     printf("\t%s: len=%d\n", __func__, len);
+     ERRET(0 > len, "read");
+
+     /* EOF */
+     if (0 == len)
+          return (-1);
+
+     ep->rcv_buf.wrpos += len;
+
+     long unsigned int hash;
+     buf_get(ep->rcv_buf, hash);
+     A(hash != 0);
+     ep_t *sock = NULL;
+     hash_for_each_possible(ep_hash, sock, hash_node, hash) {
+          if (sock->hash == hash)
+               break;
      }
 
-     return len;*/
+     if (NULL == sock) {
+          printf("\tsocket went way: dropping %d byte(s)\n",
+                 buf_read_sz(ep->rcv_buf));
+          /* Socket went away; drop data on the floor */
+          buf_reset(ep->rcv_buf);
+
+          return 0;
+     }
+
+     while (buf_write_sz(sock->snd_buf) && buf_read_sz(ep->rcv_buf))
+          sock->snd_buf.p[sock->snd_buf.wrpos++] =
+               ep->rcv_buf.p[ep->rcv_buf.rdpos++];
+     AZ(buf_read_sz(ep->rcv_buf));
+     buf_reset(ep->rcv_buf);
+
+     struct epoll_event ev;
+     memset(&ev, 0, sizeof(ev));
+     ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
+     ev.data.ptr = sock;
+
+     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, sock->fd, &ev));
+
+     return 0;
 }
 
 static int
-on_write(wsconn_t *conn)
+sock_read(ep_t *ep)
 {
-     buf_flip(conn->buf_out);
+     printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
 
-     if (LOG_VVERBOSE <= wsd_cfg->verbose)
-          printf("wschild: %s: fd=%d: %d byte(s)\n",
+     AZ(ep->rcv_buf.wrpos);
+     int len = read(ep->fd, ep->rcv_buf.p, buf_write_sz(ep->rcv_buf));
+     ERRET(0 > len, "read");
+
+     /* EOF */
+     if (0 == len)
+          return (-1);
+
+     printf("\t%s: read %d byte(s)\n", __func__, len);
+
+     ep->rcv_buf.wrpos += len;
+
+     if (-1 == snd_pipe->fd) {
+          int rv = mkfifo(snd_pathname, 0600);
+          ERRET(0 > rv && errno != EEXIST, "mkfifo");
+
+          snd_pipe->fd = open(snd_pathname, O_WRONLY | O_NONBLOCK);
+          if (0 > snd_pipe->fd) {
+               // see open(2) return values
+               A(errno == ENODEV || errno == ENXIO);
+               return (-1);
+          }
+
+          printf("\t%s: opened %s\n", __func__, snd_pathname);
+
+          struct epoll_event ev;
+          memset(&ev, 0, sizeof(ev));
+          ev.events = EPOLLOUT | EPOLLRDHUP;
+          ev.data.ptr = snd_pipe;
+          AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, snd_pipe->fd, &ev));
+     }
+
+     if (-1 == rcv_pipe->fd) {
+          int rv = mkfifo(rcv_pathname, 0600);
+          ERRET(0 > rv && errno != EEXIST, "mkfifo");
+
+          rcv_pipe->fd = open(rcv_pathname, O_RDONLY | O_NONBLOCK);
+          A(rcv_pipe->fd >= 0);
+
+          printf("\t%s: opened %s\n", __func__, rcv_pathname);
+
+          struct epoll_event ev;
+          memset(&ev, 0, sizeof(ev));
+          ev.events = EPOLLIN;
+          ev.data.ptr = rcv_pipe;
+          AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, rcv_pipe->fd, &ev));
+     }
+
+     // TODO plug in protocol handler
+     A(buf_write_sz(snd_pipe->snd_buf) > sizeof(long unsigned int));
+     buf_put(snd_pipe->snd_buf, ep->hash);
+
+     while (buf_write_sz(snd_pipe->snd_buf) && buf_read_sz(ep->rcv_buf))
+          snd_pipe->snd_buf.p[snd_pipe->snd_buf.wrpos++] =
+               ep->rcv_buf.p[ep->rcv_buf.rdpos++];
+
+     AZ(buf_read_sz(ep->rcv_buf));
+     buf_reset(ep->rcv_buf);
+
+     struct epoll_event ev;
+     memset(&ev, 0, sizeof(ev));
+     ev.events = EPOLLOUT | EPOLLRDHUP;
+     ev.data.ptr = snd_pipe;
+     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, snd_pipe->fd, &ev));
+
+     hash_add(ep_hash, &ep->hash_node, ep->hash);
+
+     return 0;
+}
+
+static int
+sock_write(ep_t *ep)
+{
+     printf("*** %s: ep->fd=%d, ep->snd_buf.rdpos=%d\n",
+            __func__,
+            ep->fd,
+            ep->snd_buf.rdpos);
+
+     A(ep->fd >= 0);
+     A(buf_read_sz(ep->snd_buf) > 0);
+     int len = write(ep->fd, ep->snd_buf.p, buf_read_sz(ep->snd_buf));
+     if (0 < len) {
+          printf("\t%s: wrote %d byte(s)\n", __func__, len);
+
+          ep->snd_buf.rdpos += len;
+          AZ(buf_read_sz(ep->snd_buf));
+          buf_reset(ep->snd_buf);
+
+          if (0 == ep->snd_buf.rdpos) {
+               struct epoll_event ev;
+               memset(&ev, 0, sizeof(ev));
+               ev.events = EPOLLIN | EPOLLRDHUP;
+               ev.data.ptr = ep;
+               AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
+
+               printf("\t%s: removing EPOLLOUT: ep->fd=%d\n",
+                      __func__,
+                      ep->fd);
+          }
+     } else {
+          A(0 > len);
+     }
+
+     return len;
+}
+
+static int sock_close(ep_t *ep)
+{
+     printf("*** %s: ep->fd=%d, read_sz=%u, write_sz=%u\n",
+            __func__,
+            ep->fd,
+            buf_read_sz(ep->rcv_buf),
+            buf_write_sz(ep->snd_buf));
+
+     A(ep->hash != 0L);
+     A(ep->fd >= 0);
+     A(ep->close != NULL);
+     A(ep->read != NULL);
+     A(ep->write != NULL);
+     AZ(close(ep->fd));
+
+     if (hash_hashed(&ep->hash_node)) {
+          printf("\t %s: removing ep->fd=%d from hashtable\n",
                  __func__,
-                 conn->fd,
-                 buf_len(conn->buf_out));
-
-     int len;
-     len = write(conn->fd,
-                 buf_ref(conn->buf_out),
-                 buf_len(conn->buf_out));
-
-     int rv = 1;
-     if (0 < len) {
-          buf_fwd(conn->buf_out, len);
-          buf_compact(conn->buf_out);
-
-          if (0 == buf_pos(conn->buf_out)) {
-               if (conn->close_on_write) {
-                    if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-                         printf("wschild: %s: fd=%d: close-on-write\n",
-                                __func__,
-                                conn->fd);
-                    }
-
-                    rv = (-1);
-               } else {
-                    rv = 0;
-               }
-          }
-     }
-     
-     if (0 > len) {
-          if (errno == EAGAIN || errno == EWOULDBLOCK) {
-               buf_flip(conn->buf_out);
-          } else {
-               rv = (-1);
-          }
+                 ep->fd);
+          hash_del(&ep->hash_node);
      }
 
-     return rv;
-}
+     free(ep);
 
-static void
-sigterm(int sig)
-{
-/*  int num_use=0;
-    int i;
-    for (i=0; i < MAX_DESC; i++)
-    {
-    if (pfd_is_in_use(i))
-    {
-    on_close(&conn[i]);
-    free_conn_and_pfd(i);
-    num_use++;
-    }
-    }
-*/
-//  syslog(LOG_INFO, "caught signal, terminating %d client(s)", num_use);
-}
-
-static void
-on_close(wsconn_t *conn)
-{
-/*  if (wsd_cfg->verbose)
-    printf("wschild: on_close: fd=%d\n", conn->pfd->fd);
-
-    if (conn->on_close)
-    conn->on_close(conn);*/
-}
-
-int wschild_register_user_fd(int fd,
-                             int (*on_read)(struct wsconn *conn),
-                             int (*on_write)(struct wsconn *conn),
-                             short events)
-{
      return 0;
 }
 
-struct wsconn* wschild_lookup_kernel_fd(int fd)
+static int
+pipe_write(ep_t *ep)
 {
-     return NULL;
+     printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
+
+     A(ep->fd >= 0);
+     A(ep->snd_buf.p);
+     A(buf_read_sz(ep->snd_buf) > 0);
+     int len = write(ep->fd, ep->snd_buf.p, buf_read_sz(ep->snd_buf));
+     if (0 < len) {
+          printf("\t%s: wrote %d byte(s)\n", __func__, len);
+
+          ep->snd_buf.rdpos += len;
+          AZ(buf_read_sz(ep->snd_buf));
+          buf_reset(ep->snd_buf);
+
+          struct epoll_event ev;
+          memset(&ev, 0, sizeof(ev));
+          ev.events = EPOLLRDHUP;
+          ev.data.ptr = ep;
+          AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
+
+          printf("\t%s: removing EPOLLOUT: fd=%d\n",
+                 __func__,
+                 ep->fd);
+     } else {
+          A(0 > len);
+     }
+
+     return len;
+}
+
+static int
+pipe_close(ep_t *ep)
+{
+     printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
+
+     A(ep->fd >= 0);
+     A(ep->read == NULL ? ep->write != NULL : ep->write == NULL);
+     A(ep->rcv_buf.p == NULL ? ep->snd_buf.p != NULL : ep->rcv_buf.p != NULL);
+
+     AZ(close(ep->fd));
+
+     if (snd_pipe == ep)
+          init_snd_pipe();
+     else if (rcv_pipe == ep)
+          init_rcv_pipe();
+
+     return 0;
 }
