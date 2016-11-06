@@ -28,7 +28,7 @@
      obj = *(typeof(obj)*)(&buf.p[buf.rdpos]);  \
      buf.rdpos += sizeof(typeof(obj));
 
-#define BUF_SIZE      128
+#define BUF_SIZE      512
 #define UNASSIGNED    (-1)
 #define LOG_VVVERBOSE 3
 #define LOG_VVERBOSE  2
@@ -70,6 +70,13 @@ typedef struct {
      unsigned int wrpos;
 } buf2_t;
 
+struct endpoint;
+
+typedef struct {
+     int (*recv)(struct endpoint *ep);
+     int (*send)(struct endpoint *ep);
+} proto_t;
+
 struct endpoint {
      long unsigned int hash;
      buf2_t snd_buf;
@@ -80,6 +87,7 @@ struct endpoint {
      int (*close)(struct endpoint *ep);
      struct hlist_node hash_node;
      unsigned char close_on_write:1;
+     proto_t proto;
 };
 typedef struct endpoint ep_t;
 

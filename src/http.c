@@ -20,7 +20,7 @@ static int found_upgrade(string_t *result);
 static int tokenise_connection(string_t *s);
 
 int
-http_read(ep_t *ep)
+http_recv(ep_t *ep)
 {
      AN(buf_read_sz(ep->rcv_buf));
 
@@ -35,7 +35,7 @@ http_read(ep_t *ep)
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
           ep->rcv_buf.p[ep->rcv_buf.wrpos] = '\0';
-          printf("%s", ep->rcv_buf.p[ep->rcv_buf.rdpos]);
+          printf("%s\n", &ep->rcv_buf.p[ep->rcv_buf.rdpos]);
      }
 
      int rv;
@@ -162,8 +162,6 @@ error:
 
      return 0;
 }
-
-int http_write(ep_t *ep) { return (-1); }
 
 static int
 is_valid_req_line(http_req_t *hr)

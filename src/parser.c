@@ -19,8 +19,7 @@ is_rfc7230_start_line(char c)
      else if ('0' <= c && c <= '9')
           return 1;
 
-     switch (c)
-     {
+     switch (c) {
      case ' ':
      case '/':
      case '.':
@@ -42,8 +41,7 @@ is_rfc7230_field_value(char c)
      if (is_rfc7230_start_line(c))
           return 1;
 
-     switch (c)
-     {
+     switch (c) {
      case '\t':
      case '=':
      case '_':
@@ -69,8 +67,7 @@ is_rfc7230_header_field(char c)
      else if ('0' <= c && c <= '9')
           return 1;
 
-     switch (c)
-     {
+     switch (c) {
      case '-':
           break;
      default:
@@ -95,8 +92,7 @@ http_header_tok(char *s, string_t *result)
      result->len = 0;
      errno = 0;
      
-     if (NULL == cur)
-     {
+     if (NULL == cur) {
           errno = EINPUT;
           return (-1);
      }
@@ -106,17 +102,14 @@ http_header_tok(char *s, string_t *result)
      if (NULL == prev)
           /* invocation with new input */
           while (is_rfc7230_start_line(*cur++));
-     else
-     {
+     else {
           /* resuming with saved input */
           while (is_rfc7230_header_field(*cur++));
 
-          if (NULL == cur)
-          {
+          if (NULL == cur) {
                errno = EUNEXPECTED_EOS;
                return (-1);
-          }
-          else if (':' != *(char*)(cur - 1))
+          } else if (':' != *(char*)(cur - 1))
                goto finish;
 
           while (is_rfc7230_field_value(*cur++));
@@ -124,13 +117,10 @@ http_header_tok(char *s, string_t *result)
 
 finish:
      /* cur should point to CRLF; otherwise it's an error */
-     if (NULL == cur)
-     {
+     if (NULL == cur) {
           errno = EUNEXPECTED_EOS;
           return (-1);
-     }
-     else if (CRLF != *(short*)(cur - 1))
-     {
+     } else if (CRLF != *(short*)(cur - 1)) {
           /* Implementing as MUST; see RFC7230, section 3.5 */
           errno = EUNEXPECTED_CHAR;
           return (-1);
@@ -147,8 +137,7 @@ finish:
 int
 parse_request_line(string_t *tok, http_req_t *req)
 {
-     if (NULL == tok || 0 == tok->len)
-     {
+     if (NULL == tok || 0 == tok->len) {
           errno = EINPUT;
           return (-1);
      }
@@ -161,8 +150,7 @@ parse_request_line(string_t *tok, http_req_t *req)
                break;
 
      int len = cur - tok->start;
-     if (0 == len || ' ' != *(cur - 1))
-     {
+     if (0 == len || ' ' != *(cur - 1)) {
           errno = EUNEXPECTED_CHAR;
           return (-1);
      }
@@ -185,9 +173,8 @@ parse_request_line(string_t *tok, http_req_t *req)
      req->req_target.start = start;
      req->req_target.len = len - 1; /* excludes SP */
 
-     if (8 != (tok->len - i) ||
-         HTTP_version != *(long long*)(cur))
-     {
+     if (8 != (tok->len - i)
+         || HTTP_version != *(long long*)(cur)) {
           errno = EUNEXPECTED_CHAR;
           return (-1);
      }
@@ -213,18 +200,13 @@ parse_header_field(string_t *tok, http_req_t *req)
 
      int len = cur - tok->start; /* inclusive colon */
 
-     if (CMP("Host", 4))
-     {
+     if (CMP("Host", 4)) {
           ASSIGN(req->host);
           return 1;
-     }
-     else if (CMP("Upgrade", 7))
-     {
+     } else if (CMP("Upgrade", 7)) {
           ASSIGN(req->upgrade);
           return 1;
-     }
-     else if (CMP("Connection", 10))
-     {
+     } else if (CMP("Connection", 10)) {
           /*
            * Connection header field can appear multiple times
            * and implementations are supposed to combine values
@@ -239,34 +221,22 @@ parse_header_field(string_t *tok, http_req_t *req)
           }
           
           return 1;
-     }
-     else if (CMP("Sec-WebSocket-Key", 17))
-     {
+     } else if (CMP("Sec-WebSocket-Key", 17)) {
           ASSIGN(req->sec_ws_key);
           return 1;
-     }
-     else if (CMP("Sec-WebSocket-Version", 21))
-     {
+     } else if (CMP("Sec-WebSocket-Version", 21)) {
           ASSIGN(req->sec_ws_ver);
           return 1;
-     }
-     else if (CMP("Sec-WebSocket-Protocol", 22))
-     {
+     } else if (CMP("Sec-WebSocket-Protocol", 22)) {
           ASSIGN(req->sec_ws_proto);
           return 1;
-     }
-     else if (CMP("Sec-WebSocket-Extensions", 24))
-     {
+     } else if (CMP("Sec-WebSocket-Extensions", 24)) {
           ASSIGN(req->sec_ws_ext);
           return 1;
-     }
-     else if (CMP("Origin", 6))
-     {
+     } else if (CMP("Origin", 6)) {
           ASSIGN(req->origin);
           return 1;
-     }
-     else if (CMP("User-Agent", 10))
-     {
+     } else if (CMP("User-Agent", 10)) {
           ASSIGN(req->user_agent);
           return 1;
      }

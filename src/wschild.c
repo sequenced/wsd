@@ -16,6 +16,7 @@
 #include <sys/epoll.h>
 #include "wstypes.h"
 #include "hashtable.h"
+#include "http.h"
 
 #define MAX_EVENTS 256
 #define DEFAULT_QUANTUM 5000
@@ -36,7 +37,7 @@ static int sock_close(ep_t *ep);
 static int pipe_write(ep_t *ep);
 static int pipe_read(ep_t *ep);
 static int pipe_close(ep_t *ep);
-static int on_accept(int lfd);
+static int sock_accept(int lfd);
 static void init_snd_pipe();
 static void init_rcv_pipe();
 static long unsigned int hash(struct sockaddr_in *saddr, struct timespec *ts);
@@ -67,7 +68,9 @@ wschild_main(const wsd_config_t *cfg)
      init_rcv_pipe();
 
      hash_init(ep_hash);
-     printf("*** %s: endpoint hashtable has %lu entries\n",
+     printf("%s:%d: %s: endpoint hashtable has %lu entries\n",
+            __FILE__,
+            __LINE__,
             __func__,
             sizeof ep_hash);
 
@@ -131,11 +134,13 @@ io_loop() {
           for (n = 0; n < nfd; ++n) {
 
                if (evs[n].data.fd == wsd_cfg->lfd) {
-                    AZ(on_accept(evs[n].data.fd));
+                    AZ(sock_accept(evs[n].data.fd));
                     continue;
                }
 
-               printf("*** %s: nfd=%d, events=0x%x\n",
+               printf("%s:%d: %s: nfd=%d, events=0x%x\n",
+                      __FILE__,
+                      __LINE__,
                       __func__,
                       nfd,
                       evs[n].events);
@@ -162,7 +167,7 @@ io_loop() {
 }
 
 static int
-on_accept(int lfd)
+sock_accept(int lfd)
 {
      struct sockaddr_in saddr;
      memset(&saddr, 0x0, sizeof(saddr));
@@ -186,6 +191,7 @@ on_accept(int lfd)
      ep->read = sock_read;
      ep->write = sock_write;
      ep->close = sock_close;
+     ep->proto.recv = http_recv;
 
      struct timespec ts;
      memset((void*)&ts, 0, sizeof(ts));
@@ -193,7 +199,9 @@ on_accept(int lfd)
      ep->hash = hash(&saddr, &ts);
      AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
 
-     printf("*** %s: eg->fd=%d, hash=0x%lx\n",
+     printf("%s:%d: %s: eg->fd=%d, hash=0x%lx\n",
+            __FILE__,
+            __LINE__,
             __func__,
             fd,
             ep->hash);
@@ -204,7 +212,11 @@ on_accept(int lfd)
 static int
 pipe_read(ep_t *ep)
 {
-     printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
+     printf("%s:%d: %s: ep->fd=%d\n",
+            __FILE__,
+            __LINE__,
+            __func__,
+            ep->fd);
 
      AZ(ep->rcv_buf.wrpos);
      int len = read(ep->fd, ep->rcv_buf.p, buf_write_sz(ep->rcv_buf));
@@ -268,7 +280,7 @@ sock_read(ep_t *ep)
 
      ep->rcv_buf.wrpos += len;
 
-     if (-1 == snd_pipe->fd) {
+/*     if (-1 == snd_pipe->fd) {
           int rv = mkfifo(snd_pathname, 0600);
           ERRET(0 > rv && errno != EEXIST, "mkfifo");
 
@@ -303,27 +315,9 @@ sock_read(ep_t *ep)
           ev.data.ptr = rcv_pipe;
           AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, rcv_pipe->fd, &ev));
      }
-
-     // TODO plug in protocol handler
-     A(buf_write_sz(snd_pipe->snd_buf) > sizeof(long unsigned int));
-     buf_put(snd_pipe->snd_buf, ep->hash);
-
-     while (buf_write_sz(snd_pipe->snd_buf) && buf_read_sz(ep->rcv_buf))
-          snd_pipe->snd_buf.p[snd_pipe->snd_buf.wrpos++] =
-               ep->rcv_buf.p[ep->rcv_buf.rdpos++];
-
-     AZ(buf_read_sz(ep->rcv_buf));
-     buf_reset(ep->rcv_buf);
-
-     struct epoll_event ev;
-     memset(&ev, 0, sizeof(ev));
-     ev.events = EPOLLOUT | EPOLLRDHUP;
-     ev.data.ptr = snd_pipe;
-     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, snd_pipe->fd, &ev));
-
-     hash_add(ep_hash, &ep->hash_node, ep->hash);
-
-     return 0;
+*/
+     AN(ep->proto.recv);
+     return ep->proto.recv(ep);
 }
 
 static int
