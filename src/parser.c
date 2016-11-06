@@ -164,8 +164,7 @@ parse_request_line(string_t *tok, http_req_t *req)
                break;
 
      len = cur - start;
-     if (0 == len || i == len)
-     {
+     if (0 == len || i == len) {
           errno = EUNEXPECTED_CHAR;
           return (-1);
      }
@@ -182,7 +181,7 @@ parse_request_line(string_t *tok, http_req_t *req)
      req->http_ver.start = start;
      req->http_ver.len = 8;
 
-     return 1;
+     return 0;
 }
 
 #define ASSIGN(to)                              \

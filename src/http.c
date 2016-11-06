@@ -34,8 +34,8 @@ http_recv(ep_t *ep)
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          ep->rcv_buf.p[ep->rcv_buf.wrpos] = '\0';
-          printf("%s\n", &ep->rcv_buf.p[ep->rcv_buf.rdpos]);
+          ep->rcv_buf->p[ep->rcv_buf->wrpos] = '\0';
+          printf("%s\n", &ep->rcv_buf->p[ep->rcv_buf->rdpos]);
      }
 
      int rv;
@@ -43,13 +43,9 @@ http_recv(ep_t *ep)
      memset(&t, 0x0, sizeof(string_t));
 
      /* Tokenise start line ... */
-     if (0 > (rv = http_header_tok(&ep->rcv_buf.p[ep->rcv_buf.rdpos], &t))) {
+     if (0 > (rv = http_header_tok(&ep->rcv_buf->p[ep->rcv_buf->rdpos], &t))) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s:%d: %s: errno=%d\n",
-                      __FILE__,
-                      __LINE__,
-                      __func__,
-                      errno);
+               printf("\t%s: errno=%d\n", __func__, errno);
           }
 
           if (EUNEXPECTED_EOS == errno) {
@@ -66,11 +62,7 @@ http_recv(ep_t *ep)
      /* ... parse status line, see whether or not it's a request ... */
      if (0 > (rv = parse_request_line(&t, &hr))) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s:%d: %s: errno=%d\n",
-                      __FILE__,
-                      __LINE__,
-                      __func__,
-                      errno);
+               printf("\t%s: errno=%d\n", __func__, errno);
           }
 
           if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
@@ -91,11 +83,7 @@ http_recv(ep_t *ep)
      while (0 < (rv = http_header_tok(NULL, &t))) {
           if (0 > (rv = parse_header_field(&t, &hr))) {
                if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-                    printf("\t%s:%d: %s: errno=%d\n",
-                           __FILE__,
-                           __LINE__,
-                           __func__,
-                           errno);
+                    printf("\t%s: errno=%d\n", __func__, errno);
                }
 
                if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
@@ -108,10 +96,7 @@ http_recv(ep_t *ep)
      /* ... and finally, validate HTTP-related fields. */
      if (!is_valid_host_header_field(&hr)) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s:%d: %s: invalid host header field\n",
-                      __FILE__,
-                      __LINE__,
-                      __func__);
+               printf("\t%s: invalid host header field\n", __func__);
           }
 
           /* Implementing as MUST; see RFC7230, section 5.4 and
@@ -125,10 +110,7 @@ http_recv(ep_t *ep)
 
      if (!is_valid_upgrade_header_field(&hr)) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s:%d: %s: invalid upgrade header field\n",
-                      __FILE__,
-                      __LINE__,
-                      __func__);
+               printf("\t%s: invalid upgrade header field\n", __func__);
           }
 
           if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
@@ -139,10 +121,7 @@ http_recv(ep_t *ep)
      
      if (!is_valid_connection_header_field(&hr)) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s:%d: %s: invalid connection header field\n",
-                      __FILE__,
-                      __LINE__,
-                      __func__);
+               printf("\t%s: invalid connection header field\n", __func__);
           }
 
           if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
@@ -151,10 +130,7 @@ http_recv(ep_t *ep)
           goto error;
      }
 
-//     if (0 > conn->on_handshake(conn, &hr))
-//          return -1;
-
-     return 0;
+     return ep->proto.handshake(ep, &hr);
 
 error:
      buf_reset(ep->rcv_buf);
@@ -166,8 +142,8 @@ error:
 static int
 is_valid_req_line(http_req_t *hr)
 {
-     if (hr->method.len == 3 &&
-         0 != strncmp(hr->method.start, METHOD_GET, hr->method.len))
+     if (hr->method.len == 3
+         && 0 != strncmp(hr->method.start, METHOD_GET, hr->method.len))
           return 0;
 
      /* HTTP-version checked as side-effect of parsing request line */
@@ -186,7 +162,7 @@ is_valid_req_line(http_req_t *hr)
 }
 
 int
-http_prepare_response(buf2_t b, const char *s)
+http_prepare_response(buf2_t *b, const char *s)
 {
      size_t len = strlen(s);
 
@@ -194,8 +170,8 @@ http_prepare_response(buf2_t b, const char *s)
      if (buf_write_sz(b) < len)
           return (-1);
 
-     strcpy(&b.p[b.wrpos], s);
-     b.wrpos += len;
+     strcpy(&b->p[b->wrpos], s);
+     b->wrpos += len;
 
      return 0;
 }

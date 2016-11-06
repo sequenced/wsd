@@ -12,8 +12,7 @@
 /* defined status codes, see RFC6455 section 7.4.1 */
 #define WS_1011 1011
 
-int ws_on_handshake(wsconn_t *conn, http_req_t *hr);
-int ws_on_read(wsconn_t *conn);
-int ws_on_write(wsconn_t *conn);
+int ws_handshake(ep_t *ep, http_req_t *hr);
+int ws_read(ep_t *ep);
 
 #endif /* #ifndef __WS_H__ */

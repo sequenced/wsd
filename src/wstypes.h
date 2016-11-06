@@ -18,17 +18,17 @@
 #define ERREXIT(exp, text)                      \
      if (exp) { perror(text); exit(1); }
 
-#define buf_read_sz(buf) (buf.wrpos - buf.rdpos)
-#define buf_write_sz(buf) ((unsigned int)sizeof(buf.p) - buf.wrpos)
-#define buf_reset(buf) buf.wrpos = 0; buf.rdpos = 0;
+#define buf_read_sz(buf) (buf->wrpos - buf->rdpos)
+#define buf_write_sz(buf) ((unsigned int)sizeof(buf->p) - buf->wrpos)
+#define buf_reset(buf) buf->wrpos = 0; buf->rdpos = 0;
 #define buf_put(buf, obj)                       \
-     *(typeof(obj)*)(&buf.p[buf.wrpos]) = obj;  \
-     buf.wrpos += sizeof(typeof(obj));
+     *(typeof(obj)*)(&buf->p[buf->wrpos]) = obj; \
+     buf->wrpos += sizeof(typeof(obj));
 #define buf_get(buf, obj)                       \
-     obj = *(typeof(obj)*)(&buf.p[buf.rdpos]);  \
-     buf.rdpos += sizeof(typeof(obj));
+     obj = *(typeof(obj)*)(&buf->p[buf->rdpos]); \
+     buf->rdpos += sizeof(typeof(obj));
 
-#define BUF_SIZE      512
+#define BUF_SIZE      2048
 #define UNASSIGNED    (-1)
 #define LOG_VVVERBOSE 3
 #define LOG_VVERBOSE  2
@@ -75,12 +75,13 @@ struct endpoint;
 typedef struct {
      int (*recv)(struct endpoint *ep);
      int (*send)(struct endpoint *ep);
+     int (*handshake)(struct endpoint *ep, http_req_t *hr);
 } proto_t;
 
 struct endpoint {
      long unsigned int hash;
-     buf2_t snd_buf;
-     buf2_t rcv_buf;
+     buf2_t *snd_buf;
+     buf2_t *rcv_buf;
      int fd;
      int (*read)(struct endpoint *ep);
      int (*write)(struct endpoint *ep);
