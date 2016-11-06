@@ -20,19 +20,6 @@
 #define MAX_EVENTS 256
 #define DEFAULT_QUANTUM 5000
 
-#define ERRET(exp, text)                        \
-     if (exp) { perror(text); return (-1); }
-
-#define buf_read_sz(buf) (buf.wrpos - buf.rdpos)
-#define buf_write_sz(buf) ((unsigned int)sizeof(buf.p) - buf.wrpos)
-#define buf_reset(buf) buf.wrpos = 0; buf.rdpos = 0;
-#define buf_put(buf, obj)                       \
-     *(typeof(obj)*)(&buf.p[buf.wrpos]) = obj;  \
-     buf.wrpos += sizeof(typeof(obj));
-#define buf_get(buf, obj)                       \
-     obj = *(typeof(obj)*)(&buf.p[buf.rdpos]);  \
-     buf.rdpos += sizeof(typeof(obj));
-
 const wsd_config_t *wsd_cfg = NULL;
 
 static const char *snd_pathname = "/tmp/pipe-inbound";
@@ -367,6 +354,9 @@ sock_write(ep_t *ep)
                printf("\t%s: removing EPOLLOUT: ep->fd=%d\n",
                       __func__,
                       ep->fd);
+
+               if (ep->close_on_write)
+                    sock_close(ep);
           }
      } else {
           A(0 > len);
@@ -391,7 +381,7 @@ static int sock_close(ep_t *ep)
      AZ(close(ep->fd));
 
      if (hash_hashed(&ep->hash_node)) {
-          printf("\t %s: removing ep->fd=%d from hashtable\n",
+          printf("\t%s: removing ep->fd=%d from hashtable\n",
                  __func__,
                  ep->fd);
           hash_del(&ep->hash_node);
