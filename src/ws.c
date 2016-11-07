@@ -56,14 +56,14 @@ static int is_valid_ver(http_req_t *hr);
 static int is_valid_proto(http_req_t *hr);
 static int prepare_handshake(buf2_t *b, http_req_t *hr);
 static int generate_accept_val(buf2_t *b, http_req_t *hr);
-/* static int fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf); */
-/* static void decode(buf2_t *b, wsframe_t *wsf); */
+static int fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf);
+static void decode(buf2_t *buf, wsframe_t *wsf);
 /* static int on_close_frame(wsconn_t *conn, buf2_t *b); */
 /* static int on_ping_frame(buf2_t *b, wsframe_t *wsf); */
 /* static int on_pong_frame(buf2_t *b, wsframe_t *wsf); */
 /* static int start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status); */
 /* static int prepare_close_frame(buf2_t *b, int status); */
-/* static int dispatch(ep_t *ep, wsframe_t *wsf); */
+static int dispatch(ep_t *ep, wsframe_t *wsf);
 //static location_config_t *lookup_location(http_req_t *hr);
 
 static int
@@ -191,12 +191,11 @@ ws_handshake(ep_t *ep, http_req_t *hr)
      }
 
      /* "switch" into websocket mode */
-//     conn->on_read = ws_read;
-//     conn->on_write = ws_write;
+     ep->proto.recv = ws_recv;
 
      /* hook up protocol handlers */
-//     conn->on_data_frame = loc->on_data_frame;
-//     conn->on_close = loc->on_close;
+    /* ep->proto. = loc->on_data_frame; */
+    /* conn->on_close = loc->on_close; */
 
      /* link connection with the location it serves */
 //     conn->location = loc;
@@ -219,65 +218,78 @@ ok:
 }
 
 int
-ws_read(ep_t *ep)
+ws_recv(ep_t *ep)
 {
-     /* buf_flip(conn->buf_in); */
+     AN(buf_read_sz(ep->rcv_buf));
 
-     /* if (buf_len(conn->buf_in) < WS_MASKED_FRAME_LEN) */
-     /* { */
-     /*      /\* need at least WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2 *\/ */
-     /*      buf_flip(conn->buf_in); */
-     /*      return 1; */
-     /* } */
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, read_sz=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 buf_read_sz(ep->rcv_buf));
+     }
 
-     /* int old_pos = buf_pos(conn->buf_in); */
+     if (buf_read_sz(ep->rcv_buf) < WS_MASKED_FRAME_LEN) {
+          /* need WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2 */
+          return 1;
+     }
 
-     /* wsframe_t wsf; */
-     /* memset(&wsf, 0x0, sizeof(wsframe_t)); */
-     /* wsf.byte1 = buf_get(conn->buf_in); */
-     /* wsf.byte2 = buf_get(conn->buf_in); */
+     int old_rdpos = ep->rcv_buf->rdpos;
 
-     /* /\* see RFC6455 section 5.2 *\/ */
-     /* if (RSV1_BIT(wsf.byte1) != 0 */
-     /*     || RSV2_BIT(wsf.byte1) != 0 */
-     /*     || RSV3_BIT(wsf.byte1) != 0 */
-     /*     || MASK_BIT(wsf.byte2) == 0) */
-     /* { */
-     /*      /\* TODO fail connection *\/ */
-     /* } */
+     wsframe_t wsf;
+     memset(&wsf, 0x0, sizeof(wsframe_t));
+     buf_get(ep->rcv_buf, wsf.byte1);
+     buf_get(ep->rcv_buf, wsf.byte2);
 
-     /* if (0>fill_in_wsframe_details(conn->buf_in, &wsf)) */
-     /* { */
-     /*      buf_rwnd(conn->buf_in, buf_pos(conn->buf_in)-old_pos); */
-     /*      buf_flip(conn->buf_in); */
-     /*      return 1; */
-     /* } */
+     /* see RFC6455 section 5.2 */
+     if (RSV1_BIT(wsf.byte1) != 0
+         || RSV2_BIT(wsf.byte1) != 0
+         || RSV3_BIT(wsf.byte1) != 0
+         || MASK_BIT(wsf.byte2) == 0) {
+          /* TODO fail connection */
+     }
 
-     /* if (LOG_VVERBOSE <= wsd_cfg->verbose) */
-     /*      printf("ws: on_read: sfd=%d: frame: 0x%hhx, 0x%hhx, opcode=0x%x, len=%lu\n", */
-     /*             conn->sfd, */
-     /*             wsf.byte1, */
-     /*             wsf.byte2, */
-     /*             OPCODE(wsf.byte1), */
-     /*             wsf.payload_len); */
+     if (0 > fill_in_wsframe_details(ep->rcv_buf, &wsf)) {
+          ep->rcv_buf->rdpos = old_rdpos;
+          return 1;
+     }
 
-     /* /\* TODO check that payload64 has left-most bit off *\/ */
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("\t%s: fd=%d, frame: 0x%hhx, 0x%hhx, opcode=0x%x, len=%lu\n",
+                 __func__,
+                 ep->fd,
+                 wsf.byte1,
+                 wsf.byte2,
+                 OPCODE(wsf.byte1),
+                 wsf.payload_len);
+     }
 
-     /* if (buf_len(conn->buf_in) < wsf.payload_len) */
-     /* { */
-     /*      buf_rwnd(conn->buf_in, buf_pos(conn->buf_in)-old_pos); */
-     /*      buf_flip(conn->buf_in); */
-     /*      return 1; */
-     /* } */
+     /* TODO check that payload64 has left-most bit off */
 
-     /* decode(conn->buf_in, &wsf); */
-     /* return dispatch(conn, &wsf); */
-     return 0;
+     if (buf_read_sz(ep->rcv_buf) < wsf.payload_len) {
+          ep->rcv_buf->rdpos = old_rdpos;
+          return 1;
+     }
+
+     decode(ep->rcv_buf, &wsf);
+     return dispatch(ep, &wsf);
 }
 
-/* int */
-/* dispatch(ep_t *ep, wsframe_t *wsf) */
-/* { */
+int
+dispatch(ep_t *ep, wsframe_t *wsf)
+{
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, payload_len=%lu\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 wsf->payload_len);
+     }
+
+     buf_reset(ep->rcv_buf);
 /*      int rv; */
 /*      buf_t slice; */
 /*      buf_slice(&slice, conn->buf_in, wsf->payload_len); */
@@ -307,69 +319,67 @@ ws_read(ep_t *ep)
 /*      buf_fwd(conn->buf_in, wsf->payload_len); */
 /*      buf_compact(conn->buf_in); */
 
-/*      return rv; */
-/* } */
+     /* return rv; */
+     return 0;
+}
 
-/* static void */
-/* decode(buf2_t *buf, wsframe_t *wsf) */
-/* { */
-/*      int pos = buf_pos(buf); */
-/*      int j, i; */
-/*      for (i = 0; i < wsf->payload_len; i++) */
-/*      { */
-/*           char b = buf_get(buf); */
-/*           j = i%4; */
-/*           unsigned char mask; */
-/*           if (j == 0) */
-/*                mask = (unsigned char)(wsf->masking_key&0x000000ff); */
-/*           else if (j == 1) */
-/*                mask = (unsigned char)((wsf->masking_key&0x0000ff00)>>8); */
-/*           else if (j == 2) */
-/*                mask = (unsigned char)((wsf->masking_key&0x00ff0000)>>16); */
-/*           else */
-/*                mask = (unsigned char)((wsf->masking_key&0xff000000)>>24); */
+static void
+decode(buf2_t *buf, wsframe_t *wsf)
+{
+     int old_rdpos = buf->rdpos;
+     int j, i;
+     for (i = 0; i < wsf->payload_len; i++) {
+          char b;
+          buf_get(buf, b);
+          j = i % 4;
 
-/*           b^=mask; */
+          unsigned char mask;
+          if (j == 0)
+               mask = (unsigned char)(wsf->masking_key & 0x000000ff);
+          else if (j == 1)
+               mask = (unsigned char)((wsf->masking_key & 0x0000ff00) >> 8);
+          else if (j == 2)
+               mask = (unsigned char)((wsf->masking_key & 0x00ff0000) >> 16);
+          else
+               mask = (unsigned char)((wsf->masking_key & 0xff000000) >> 24);
 
-/*           /\* decode in-place *\/ */
-/*           buf_rwnd(buf, 1); */
-/*           buf_put(buf, b); */
-/*      } */
+          b ^= mask;
 
-/*      buf_set_pos(buf, pos); */
-/* } */
+          /* decode in-place */
+          buf->p[buf->rdpos - 1] = b;
+     }
 
-/* static int */
-/* fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf) */
-/* { */
-/*      /\* extended payload length; see RFC6455 section 5.2 *\/ */
-/*      wsf->payload_len = PAYLOAD_LEN(wsf->byte2); */
-/*      if (wsf->payload_len < 126) */
-/*      { */
-/*           if (buf_len(b) < 4) */
-/*                return -1; */
+     buf->rdpos = old_rdpos;
+}
 
-/*           wsf->masking_key = buf_get_int(b); */
-/*      } */
-/*      else if (wsf->payload_len == 126) */
-/*      { */
-/*           if (buf_len(b) < (2 + 4)) */
-/*                return -1; */
+static int
+fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf)
+{
+     /* extended payload length; see RFC6455 section 5.2 */
+     wsf->payload_len = PAYLOAD_LEN(wsf->byte2);
+     if (wsf->payload_len < 126) {
+          if (buf_read_sz(b) < 4)
+               return -1;
 
-/*           wsf->payload_len = be16toh(buf_get_short(b)); */
-/*           wsf->masking_key = buf_get_int(b); */
-/*      } */
-/*      else if (wsf->payload_len == 127) */
-/*      { */
-/*           if (buf_len(b) < (2 + 8)) */
-/*                return -1; */
+          buf_get(b, wsf->masking_key);
+     } else if (wsf->payload_len == 126) {
+          if (buf_read_sz(b) < (2 + 4))
+               return -1;
 
-/*           wsf->payload_len = be64toh(buf_get_long(b)); */
-/*           wsf->masking_key = buf_get_int(b); */
-/*      } */
+          buf_get(b, wsf->payload_len);
+          wsf->payload_len = be16toh(wsf->payload_len);
+          buf_get(b, wsf->masking_key);
+     } else if (wsf->payload_len == 127) {
+          if (buf_read_sz(b) < (2 + 8))
+               return -1;
 
-/*      return 0; */
-/* } */
+          buf_get(b, wsf->payload_len);
+          wsf->payload_len = be64toh(wsf->payload_len);
+          buf_get(b, wsf->masking_key);
+     }
+
+     return 0;
+}
 
 /* static int */
 /* on_close_frame(wsconn_t *conn, buf2_t *b) */

@@ -150,12 +150,23 @@ io_loop() {
                if (evs[n].events & EPOLLIN ||
                    evs[n].events & EPOLLPRI) {
                     int rv = ep->read(ep);
-                    if (0 > rv)
+                    if (0 > rv) {
                          AZ(ep->close(ep));
+                    } else {
+                         A(0 <= rv);
+                         struct epoll_event ev;
+                         memset(&ev, 0, sizeof(ev));
+                         ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
+                         ev.data.ptr = ep;
+                         AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
+                    }
                } else if (evs[n].events & EPOLLOUT) {
                     int rv = ep->write(ep);
-                    if (0 > rv)
+                    if (0 > rv) {
                          AZ(ep->close(ep));
+                    } else {
+                         A(0 <= rv);
+                    }
                } else if (evs[n].events & EPOLLHUP ||
                           evs[n].events & EPOLLRDHUP ||
                           evs[n].events & EPOLLERR) {
@@ -335,10 +346,14 @@ sock_read(ep_t *ep)
 static int
 sock_write(ep_t *ep)
 {
-     printf("*** %s: ep->fd=%d, ep->snd_buf->rdpos=%d\n",
-            __func__,
-            ep->fd,
-            ep->snd_buf->rdpos);
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, write_sz=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 buf_write_sz(ep->snd_buf));
+     }
 
      A(ep->fd >= 0);
      A(buf_read_sz(ep->snd_buf) > 0);
@@ -373,11 +388,15 @@ sock_write(ep_t *ep)
 
 static int sock_close(ep_t *ep)
 {
-     printf("*** %s: ep->fd=%d, read_sz=%u, write_sz=%u\n",
-            __func__,
-            ep->fd,
-            buf_read_sz(ep->rcv_buf),
-            buf_write_sz(ep->snd_buf));
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, write_sz=%d, read_size=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 buf_write_sz(ep->snd_buf),
+                 buf_write_sz(ep->rcv_buf));
+     }
 
      A(ep->hash != 0L);
      A(ep->fd >= 0);

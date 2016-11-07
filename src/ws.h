@@ -13,6 +13,6 @@
 #define WS_1011 1011
 
 int ws_handshake(ep_t *ep, http_req_t *hr);
-int ws_read(ep_t *ep);
+int ws_recv(ep_t *ep);
 
 #endif /* #ifndef __WS_H__ */
