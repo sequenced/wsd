@@ -355,6 +355,11 @@ sock_write(ep_t *ep)
                  buf_write_sz(ep->snd_buf));
      }
 
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+          ep->snd_buf->p[ep->snd_buf->wrpos] = '\0';
+          printf("%s\n", &ep->snd_buf->p[ep->snd_buf->rdpos]);
+     }
+
      A(ep->fd >= 0);
      A(buf_read_sz(ep->snd_buf) > 0);
      int len = write(ep->fd, ep->snd_buf->p, buf_read_sz(ep->snd_buf));
