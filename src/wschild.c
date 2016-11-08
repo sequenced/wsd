@@ -283,6 +283,9 @@ on_write(wsconn_t *conn)
           printf("wschild: on_write: fd=%d: %d byte(s)\n",
                  conn->pfd->fd, buf_len(conn->buf_out));
 
+     if (LOG_VVVERBOSE<=wsd_cfg->verbose)
+          printf("%s\n", buf_ref(conn->buf_out));
+
      int len;
      len=write(conn->pfd->fd,
                buf_ref(conn->buf_out),
