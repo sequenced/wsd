@@ -100,8 +100,8 @@ prepare_handshake(buf2_t *b, http_req_t *hr)
      b->wrpos += strlen(WS_VER);
      strcpy(&b->p[b->wrpos], FLD_SEC_WS_VER_VAL);
      b->wrpos += strlen(FLD_SEC_WS_VER_VAL);
-     buf_put(b, '\r');
-     buf_put(b, '\n');
+     buf_put(b, (char)'\r');
+     buf_put(b, (char)'\n');
 
      /* TODO for now echo back requested protocol */
      trim(&(hr->sec_ws_proto));
@@ -112,14 +112,14 @@ prepare_handshake(buf2_t *b, http_req_t *hr)
      b->wrpos += strlen(WS_PROTO);
      strncpy(&b->p[b->wrpos], hr->sec_ws_proto.start, hr->sec_ws_proto.len);
      b->wrpos += hr->sec_ws_proto.len;
-     buf_put(b, '\r');
-     buf_put(b, '\n');
+     buf_put(b, (char)'\r');
+     buf_put(b, (char)'\n');
 
      /* terminating response as per RFC2616 section 6 */
      if (buf_write_sz(b) < 2)
           goto error;
-     buf_put(b, '\r');
-     buf_put(b, '\n');
+     buf_put(b, (char)'\r');
+     buf_put(b, (char)'\n');
 
      return 0;
 
@@ -157,8 +157,8 @@ generate_accept_val(buf2_t *b, http_req_t *hr)
 
      BIO_free_all(b64);
 
-     buf_put(b, '\r');
-     buf_put(b, '\n');
+     buf_put(b, (char)'\r');
+     buf_put(b, (char)'\n');
 
      return 1;
 }
