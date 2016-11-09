@@ -15,6 +15,7 @@
 #include <openssl/buffer.h>
 #include "http.h"
 #include "ws.h"
+#include "jen.h"
 
 #define HTTP_400              "HTTP/1.1 400 Bad Request\r\nSec-WebSocket-Version: 13\r\nContent-Length: 0\r\n\r\n"
 #define HTTP_101              "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
@@ -58,13 +59,12 @@ static int prepare_handshake(buf2_t *b, http_req_t *hr);
 static int generate_accept_val(buf2_t *b, http_req_t *hr);
 static int fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf);
 static void decode(buf2_t *buf, wsframe_t *wsf);
-/* static int on_close_frame(wsconn_t *conn, buf2_t *b); */
-/* static int on_ping_frame(buf2_t *b, wsframe_t *wsf); */
-/* static int on_pong_frame(buf2_t *b, wsframe_t *wsf); */
-/* static int start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status); */
-/* static int prepare_close_frame(buf2_t *b, int status); */
+static int close_frame(ep_t *ep, wsframe_t *b);
+static int ping_frame(ep_t *b, wsframe_t *wsf);
+static int pong_frame(ep_t *b, wsframe_t *wsf);
+static int start_closing_handshake(ep_t *ep, wsframe_t *wsf, int status);
+static int prepare_close_frame(buf2_t *b, int status);
 static int dispatch(ep_t *ep, wsframe_t *wsf);
-//static location_config_t *lookup_location(http_req_t *hr);
 
 static int
 is_valid_ver(http_req_t *hr)
@@ -192,23 +192,19 @@ ws_handshake(ep_t *ep, http_req_t *hr)
 
      /* "switch" into websocket mode */
      ep->proto.recv = ws_recv;
+     ep->proto.data_frame = jen_data_frame;
+     ep->proto.open = jen_open;
 
-     /* hook up protocol handlers */
-    /* ep->proto. = loc->on_data_frame; */
-    /* conn->on_close = loc->on_close; */
-
-     /* link connection with the location it serves */
-//     conn->location = loc;
-
-     /* application protocol can reject */
-//     if (0 > loc->on_open(wsd_cfg, conn))
-//          goto bad;
+     if (0 > ep->proto.open()) {
+          goto bad;
+     }
 
      goto ok;
 
 bad:
      if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
           return (-1);
+
      ep->close_on_write = 1;
 
 ok:
@@ -289,31 +285,28 @@ dispatch(ep_t *ep, wsframe_t *wsf)
                  wsf->payload_len);
      }
 
-     buf_reset(ep->rcv_buf);
-/*      int rv; */
-/*      buf_t slice; */
-/*      buf_slice(&slice, conn->buf_in, wsf->payload_len); */
+     int rv;
+     if (WS_CLOSE_FRAME == OPCODE(wsf->byte1))
+          rv = close_frame(ep, wsf);
+     else if (WS_PING_FRAME == OPCODE(wsf->byte1))
+          rv = ping_frame(ep, wsf);
+     else if (WS_PONG_FRAME == OPCODE(wsf->byte1))
+          rv = pong_frame(ep, wsf);
+     else if (0x0 == OPCODE(wsf->byte1)
+              || WS_TEXT_FRAME == OPCODE(wsf->byte1)
+              || WS_BINARY_FRAME == OPCODE(wsf->byte1))
+          rv = ep->proto.data_frame(ep, wsf);
+     else {
+          if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: unknown opcode: fd=%d: 0x%x\n",
+                      __func__,
+                      ep->fd,
+                      OPCODE(wsf->byte1));
+          }
 
-/*      if (WS_CLOSE_FRAME == OPCODE(wsf->byte1)) */
-/*           rv = on_close_frame(conn, &slice); */
-/*      else if (WS_PING_FRAME == OPCODE(wsf->byte1)) */
-/*           rv = on_ping_frame(&slice, wsf); */
-/*      else if (WS_PONG_FRAME == OPCODE(wsf->byte1)) */
-/*           rv = on_pong_frame(&slice, wsf); */
-/*      else if (0x0 == OPCODE(wsf->byte1) */
-/*               || WS_TEXT_FRAME == OPCODE(wsf->byte1) */
-/*               || WS_BINARY_FRAME == OPCODE(wsf->byte1)) */
-/*           rv = conn->on_data_frame(conn, wsf, &slice, conn->buf_out); */
-/*      else */
-/*      { */
-/*           if (LOG_VVVERBOSE <= wsd_cfg->verbose) */
-/*                printf("jen: unknown opcode: sfd=%d: 0x%x\n", */
-/*                       conn->sfd, */
-/*                       OPCODE(wsf->byte1)); */
-
-/*           /\* unknown opcode *\/ */
-/*           rv = start_closing_handshake(conn, wsf, WS_1011); */
-/*      } */
+          /* unknown opcode */
+          rv = start_closing_handshake(ep, wsf, WS_1011);
+     }
 
 /*      /\* clear buffer by consuming this frame's payload *\/ */
 /*      buf_fwd(conn->buf_in, wsf->payload_len); */
@@ -381,93 +374,115 @@ fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf)
      return 0;
 }
 
-/* static int */
-/* on_close_frame(wsconn_t *conn, buf2_t *b) */
-/* { */
-/*      int rv = 1; */
-/*      unsigned short status = 0; */
-/*      if (WS_FRAME_STATUS_LEN<=buf_len(b)) */
-/*           status = be16toh(buf_get_short(b)); */
+static int
+close_frame(ep_t *ep, wsframe_t *wsf)
+{
+     int rv = 0;
+     unsigned short status = 0;
+     if (WS_FRAME_STATUS_LEN <= buf_write_sz(ep->snd_buf)) {
+          buf_get(ep->rcv_buf, status);
+          status = be16toh(status);
+     }
 
-/*      if (LOG_VVERBOSE <= wsd_cfg->verbose) */
-/*           printf("ws: on_close_frame: sfd=%d: status=%u\n", */
-/*                  conn->sfd, */
-/*                  status); */
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, status=%u\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 wsf->payload_len);
+     }
 
-/*      if (!conn->closing) */
-/*      { */
-/*           if (0>prepare_close_frame(conn->buf_out, status)) */
-/*                return -1; */
+     if (!ep->closing) {
+          if (0 > prepare_close_frame(ep->snd_buf, status))
+               return -1;
 
-/*           conn->write = 1; */
-/*           conn->close_on_write = 1; */
-/*           conn->closing = 1; */
-/*      } */
-/*      else */
-/*           /\* closing handshake completed (reply to our earlier close frame) *\/ */
-/*           rv = -1; */
+          ep->close_on_write = 1;
+          ep->closing = 1;
+     } else {
+          /* closing handshake completed (reply to our earlier close frame) */
+          rv = -1;
+     }
 
-/*      /\* don't process data after close frame, see RFC6455 section 5.5.1 *\/ */
-/*      buf_clear(conn->buf_in); */
+     /* don't process data after close frame, see RFC6455 section 5.5.1 */
+     buf_reset(ep->rcv_buf);
 
-/*      return rv; */
-/* } */
+     return rv;
+}
 
 static int
-on_ping_frame(buf2_t *b, wsframe_t *wsf)
+ping_frame(ep_t *ep, wsframe_t *wsf)
 {
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd);
+     }
+
      return -1;
 }
 
 static int
-on_pong_frame(buf2_t *b, wsframe_t *wsf)
+pong_frame(ep_t *ep, wsframe_t *wsf)
 {
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd);
+     }
+
      return -1;
 }
 
-/* static int */
-/* prepare_close_frame(buf_t *b, int status) */
-/* { */
-/*      if (buf_len(b) < WS_UNMASKED_FRAME_LEN) */
-/*           return -1; */
+static int
+prepare_close_frame(buf2_t *b, int status)
+{
+     if (buf_write_sz(b) < WS_UNMASKED_FRAME_LEN)
+          return -1;
 
-/*      char byte1 = 0, byte2 = 0; */
-/*      SET_FIN_BIT(byte1); */
-/*      SET_OPCODE(byte1, WS_CLOSE_FRAME); */
+     char byte1 = 0, byte2 = 0;
+     SET_FIN_BIT(byte1);
+     SET_OPCODE(byte1, WS_CLOSE_FRAME);
 
-/*      if (0 < status) */
-/*           /\* echo back status code; see RFC6455 section 5.5.1 *\/ */
-/*           SET_PAYLOAD_LEN(byte2, 2); /\* 2 = status code typed unsigned short *\/ */
+     if (0 < status)
+          /* echo back status code; see RFC6455 section 5.5.1 */
+          SET_PAYLOAD_LEN(byte2, 2); /* 2 = status code typed unsigned short */
 
-/*      buf_put(b, byte1); */
-/*      buf_put(b, byte2); */
+     buf_put(b, (char)byte1);
+     buf_put(b, (char)byte2);
 
-/*      if (0 < status) */
-/*           buf_put_short(b, htobe16(status)); */
+     if (0 < status)
+          buf_put(b, htobe16(status));
 
-/*      return 0; */
-/* } */
+     return 0;
+}
 
-/* static int */
-/* start_closing_handshake(wsconn_t *conn, wsframe_t *wsf, int status) */
-/* { */
-/*      if (conn->closing) */
-/*           /\* closing handshake in progress *\/ */
-/*           return 1; */
+static int
+start_closing_handshake(ep_t *ep, wsframe_t *wsf, int status)
+{
+     /* Closing handshake in progress? */
+     if (ep->closing)
+          return 0;
 
-/*      if (0>prepare_close_frame(conn->buf_out, status)) */
-/*           return -1; */
+     if (0 > prepare_close_frame(ep->snd_buf, status))
+          return -1;
 
-/*      conn->write = 1; */
-/*      conn->closing = 1; */
+     ep->closing = 1;
 
-/*      if (LOG_VVERBOSE <= wsd_cfg->verbose) */
-/*           printf("ws: starting_closing_handshake: sfd=%d: status=%u\n", */
-/*                  conn->sfd, */
-/*                  status); */
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd);
+     }
 
-/*      return 1; */
-/* } */
+     return 0;
+}
 
 static int
 is_valid_proto(http_req_t *hr)

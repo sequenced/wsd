@@ -76,6 +76,8 @@ typedef struct {
      int (*recv)(struct endpoint *ep);
      int (*send)(struct endpoint *ep);
      int (*handshake)(struct endpoint *ep, http_req_t *hr);
+     int (*open)();
+     int (*data_frame)(struct endpoint *ep, wsframe_t *wsf);
 } proto_t;
 
 struct endpoint {
@@ -88,6 +90,7 @@ struct endpoint {
      int (*close)(struct endpoint *ep);
      struct hlist_node hash_node;
      unsigned char close_on_write:1;
+     unsigned char closing:1;
      proto_t proto;
 };
 typedef struct endpoint ep_t;
