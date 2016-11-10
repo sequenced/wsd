@@ -50,11 +50,13 @@ wschild_main(const wsd_config_t *cfg)
      AZ(sigaction(SIGPIPE, &sac, NULL));
 
      hash_init(ep_hash);
-     printf("%s:%d: %s: endpoint hashtable has %lu entries\n",
-            __FILE__,
-            __LINE__,
-            __func__,
-            sizeof ep_hash);
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: endpoint hashtable has %lu entries\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 sizeof ep_hash);
+     }
 
      epfd = epoll_create(1);
      A(epfd >= 0);
@@ -179,12 +181,14 @@ sock_accept(int lfd)
      ep->hash = hash(&saddr, &ts);
      AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
 
-     printf("%s:%d: %s: eg->fd=%d, hash=0x%lx\n",
-            __FILE__,
-            __LINE__,
-            __func__,
-            fd,
-            ep->hash);
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, hash=0x%lx\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 fd,
+                 ep->hash);
+     }
 
      return 0;
 }
@@ -295,9 +299,11 @@ static int sock_close(ep_t *ep)
      AZ(close(ep->fd));
 
      if (hash_hashed(&ep->hash_node)) {
-          printf("\t%s: removing ep->fd=%d from hashtable\n",
-                 __func__,
-                 ep->fd);
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: fd=%d: removing from hashtable\n",
+                      __func__,
+                      ep->fd);
+          }
           hash_del(&ep->hash_node);
      }
 

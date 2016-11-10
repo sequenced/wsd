@@ -244,7 +244,12 @@ pipe_write(ep_t *ep)
      A(buf_read_sz(ep->snd_buf) > 0);
      int len = write(ep->fd, ep->snd_buf->p, buf_read_sz(ep->snd_buf));
      if (0 < len) {
-          printf("\t%s: wrote %d byte(s)\n", __func__, len);
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {          
+               printf("\t%s: fd=%d: wrote %d byte(s)\n",
+                      __func__,
+                      ep->fd,
+                      len);
+          }
 
           ep->snd_buf->rdpos += len;
           AZ(buf_read_sz(ep->snd_buf));
@@ -256,9 +261,9 @@ pipe_write(ep_t *ep)
           ev.data.ptr = ep;
           AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
 
-          printf("\t%s: removing EPOLLOUT: fd=%d\n",
-                 __func__,
-                 ep->fd);
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: removing EPOLLOUT: fd=%d\n", __func__, ep->fd);
+          }
      } else {
           A(0 > len);
      }
@@ -269,7 +274,13 @@ pipe_write(ep_t *ep)
 static int
 pipe_close(ep_t *ep)
 {
-     printf("*** %s: ep->fd=%d\n", __func__, ep->fd);
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd);
+     }
 
      A(ep->fd >= 0);
      A(ep->read == NULL ? ep->write != NULL : ep->write == NULL);
@@ -299,7 +310,9 @@ pipe_read(ep_t *ep)
 
      AZ(ep->rcv_buf->wrpos);
      int len = read(ep->fd, ep->rcv_buf->p, buf_write_sz(ep->rcv_buf));
-     printf("\t%s: len=%d\n", __func__, len);
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("\t%s: fd=%d: read %d byte(s)\n", __func__, ep->fd, len);
+     }
      ERRET(0 > len, "read");
 
      /* EOF */
