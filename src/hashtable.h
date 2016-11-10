@@ -1,6 +1,7 @@
 #ifndef __HASHTABLE_H__
 #define __HASHTABLE_H__
 
+#include <stdbool.h>
 #include "list.h"
 
 #define HASH_SIZE(name) (ARRAY_SIZE(name))

@@ -312,8 +312,7 @@ dispatch(ep_t *ep, wsframe_t *wsf)
 /*      buf_fwd(conn->buf_in, wsf->payload_len); */
 /*      buf_compact(conn->buf_in); */
 
-     /* return rv; */
-     return 0;
+     return rv;
 }
 
 static void
