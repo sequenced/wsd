@@ -76,6 +76,18 @@ jen_data_frame(ep_t *ep, wsframe_t *wsf)
 }
 
 int
+jen_close()
+{
+     if (snd_pipe && 0 < snd_pipe->fd)
+          AZ(close(snd_pipe->fd));
+
+     if (rcv_pipe && 0 < rcv_pipe->fd)
+          AZ(close(rcv_pipe->fd));
+
+     return 0;
+}
+
+int
 jen_open()
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
