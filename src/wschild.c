@@ -3,7 +3,9 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,6 +27,8 @@ const wsd_config_t *wsd_cfg = NULL;
 
 DEFINE_HASHTABLE(ep_hash, 4);
 int epfd;
+
+static bool done = false;
 
 static int sock_read(ep_t *ep);
 static int sock_write(ep_t *ep);
@@ -75,7 +79,7 @@ wschild_main(const wsd_config_t *cfg)
 static void
 sigterm(int sig)
 {
-     /* TODO */
+     done = true;
 }
 
 static int
@@ -83,8 +87,10 @@ io_loop() {
      struct epoll_event evs[MAX_EVENTS];
      memset((void*)&evs, 0, sizeof(evs));
 
-     while (1) {
+     while (!done) {
           int nfd = epoll_wait(epfd, evs, MAX_EVENTS, DEFAULT_QUANTUM);
+          if (0 > nfd && EINTR == errno)
+               continue;
           A(nfd >= 0);
           A(nfd <= MAX_EVENTS);
 
@@ -137,6 +143,25 @@ io_loop() {
                }
           }
      }
+
+     int bkt, num = 0;
+     ep_t *ep;
+     hash_for_each(ep_hash, bkt, ep, hash_node) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: closing fd=%d\n", __func__, ep->fd);
+          }
+
+          AN(ep->close);
+          AZ(ep->close(ep));
+
+          if (ep->proto.close)
+               AZ(ep->proto.close());
+
+          num++;
+     }
+     AZ(close(wsd_cfg->lfd));
+     num++;
+     syslog(LOG_INFO, "closed %d socket(s)", num);
 
      return 0;
 }

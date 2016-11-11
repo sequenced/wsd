@@ -20,6 +20,10 @@
 #define hash_32(val, bits) (val >> (32 - bits))
 #define hash_min(val, bits)                                             \
      (sizeof(val) <= 4 ? hash_32(val, bits) : hash_long(val, bits))
+#define hash_for_each(name, bkt, obj, member)				\
+     for ((bkt) = 0, obj = NULL; obj == NULL && (bkt) < HASH_SIZE(name); \
+          (bkt)++)                                                      \
+          hlist_for_each_entry(obj, &name[bkt], member)
 
 static inline void
 __hash_init(struct hlist_head *ht, unsigned int sz)
