@@ -1,13 +1,7 @@
 bin_PROGRAMS = wsd
-wsd_SOURCES = wsd.c config_parser.c http.c ws.c wschild.c wstypes.c parser.c
+wsd_SOURCES = wsd.c wschild.c wstypes.c http.c parser.c ws.c jen.c
 wsd_CFLAGS = $(AM_CFLAGS)
 wsd_LDFLAGS = -ldl
 noinst_LIBRARIES = libtestcommon.a libwstypes.a
 libwstypes_a_SOURCES = wstypes.c
-libtestcommon_a_SOURCES = http.c ws.c wstypes.c config_parser.c parser.c
-lib_LTLIBRARIES = libchatterbox.la libjen.la
-libchatterbox_la_SOURCES = chatterbox.c ws_interface.c wstypes.c
-libchatterbox_la_CFLAGS = $(AM_CFLAGS)
-libjen_la_SOURCES = jen.c ws_interface.c wstypes.c
-libjen_la_CFLAGS = $(AM_CFLAGS)
-libjen_la_LDFLAGS = -lsshmem
+libtestcommon_a_SOURCES = wstypes.c parser.c

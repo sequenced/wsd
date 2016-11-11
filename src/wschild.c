@@ -1,569 +1,348 @@
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <syslog.h>
+#define _GNU_SOURCE
+#include <time.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
-#include <poll.h>
-#include <assert.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/epoll.h>
 #include "wstypes.h"
+#include "hashtable.h"
 #include "http.h"
 #include "ws.h"
 
-/* assumes max poll file descriptors equals max connections */
-#define MAX_DESC 32
-#define MAX_CONN MAX_DESC
-#define BUF_SIZE 8192
-#define DEFAULT_QUANTUM (1<<6)
+#define MAX_EVENTS 256
+#define DEFAULT_QUANTUM 5000
 
-#define log_addr(msg, addr, fd, slot)                                   \
-     printf(msg, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), fd, slot);
+const wsd_config_t *wsd_cfg = NULL;
 
-static int num_pfd=0;
-static int num_spfd=0;
-static struct pollfd pfd[MAX_DESC];
-static struct pollfd spfd[MAX_DESC];
-static wsconn_t conn[MAX_CONN];
-static wsconn_t sconn[MAX_CONN];
+DEFINE_HASHTABLE(ep_hash, 4);
+int epfd;
 
-const wsd_config_t *wsd_cfg=NULL;
+static bool done = false;
 
-/* forward declarations */
-static int on_accept(int fd);
-static int on_read(wsconn_t *conn);
-static int on_write(wsconn_t *conn);
-static void on_close(wsconn_t *conn);
+static int sock_read(ep_t *ep);
+static int sock_write(ep_t *ep);
+static int sock_close(ep_t *ep);
+static int sock_accept(int lfd);
 static int io_loop();
-static void sighup(int sig);
-static void free_conn_and_pfd(const int slot);
 static void sigterm(int sig);
-
-#define ws_conn_init() (conn_init(conn))
-#define sshmem_conn_init() (conn_init(sconn))
-static inline int
-conn_init(wsconn_t array[])
-{
-     memset(array, 0x0, sizeof(array));
-     int i;
-     for (i=0; i<MAX_CONN; i++)
-          if (NULL==(array[i].buf_in=buf_alloc(BUF_SIZE))
-              || NULL==(array[i].buf_out=buf_alloc(BUF_SIZE)))
-               return -1;
-
-     return 0;
-}
-
-static inline int
-conn_alloc_sshmem(int slot,
-                  struct pollfd *pfd,
-                  int (*on_read)(struct wsconn *conn),
-                  int (*on_write)(struct wsconn *conn))
-{
-     if (slot>=MAX_CONN)
-          return -1;
-
-     sconn[slot].pfd=pfd;
-     sconn[slot].on_read=on_read;
-     sconn[slot].on_write=on_write;
-     return 0;
-}
-
-static inline int
-conn_alloc_http(int slot, struct pollfd *pfd)
-{
-     if (slot>=MAX_CONN)
-          return -1;
-
-     conn[slot].pfd=pfd;
-     conn[slot].on_read=http_on_read;
-     conn[slot].on_write=http_on_write;
-     conn[slot].on_handshake=ws_on_handshake;
-     return 0;
-}
-
-static inline int
-conn_free(int slot)
-{
-     if (slot>=MAX_CONN)
-          return -1;
-
-     buf_free(conn[slot].buf_in);
-     buf_free(conn[slot].buf_out);
-
-     for (;slot<(MAX_CONN-1); slot++)
-     {
-          conn[slot].pfd=conn[slot+1].pfd;
-          conn[slot].buf_in=conn[slot+1].buf_in;
-          conn[slot].buf_out=conn[slot+1].buf_out;
-          conn[slot].on_read=conn[slot+1].on_read;
-          conn[slot].on_write=conn[slot+1].on_write;
-          conn[slot].on_data_frame=conn[slot+1].on_data_frame;
-          conn[slot].on_handshake=conn[slot+1].on_handshake;
-          conn[slot].on_close=conn[slot+1].on_close;
-          conn[slot].close_on_write=conn[slot+1].close_on_write;
-          conn[slot].closing=conn[slot+1].closing;
-          conn[slot].location=conn[slot+1].location;
-     }
-
-     conn[slot].on_read=NULL;
-     conn[slot].on_write=NULL;
-     conn[slot].on_data_frame=NULL;
-     conn[slot].on_handshake=NULL;
-     conn[slot].on_close=NULL;
-     conn[slot].pfd=NULL;
-     buf_clear(conn[slot].buf_in);
-     buf_clear(conn[slot].buf_out);
-     conn[slot].close_on_write=0;
-     conn[slot].closing=0;
-     conn[slot].location=NULL;
-
-     return 0;
-}
-
-#define pfd_get(slot) (pfd[slot])
-#define spfd_get(slot) (spfd[slot])
-
-#define pfd_init() (fd_init(pfd))
-#define spfd_init() (fd_init(spfd))
-static inline void
-fd_init(struct pollfd *fd)
-{
-     memset(fd, 0x0, sizeof(struct pollfd));
-     int i;
-     for (i=0; i<MAX_DESC; i++)
-     {
-          fd->fd=UNASSIGNED;
-          fd++;
-     }
-}
-
-static inline int
-pfd_free(int slot)
-{
-     if (slot>=MAX_DESC)
-          return -1;
-
-     for (;slot<(MAX_DESC-1); slot++)
-     {
-          pfd[slot].fd=pfd[slot+1].fd;
-          pfd[slot].events=pfd[slot+1].events;
-          pfd[slot].revents=pfd[slot+1].revents;
-     }
-
-     pfd[slot].fd=UNASSIGNED;
-     pfd[slot].events=0;
-     pfd[slot].revents=0;
-     num_pfd--;
-     return 0;
-}
-
-#define pfd_alloc(slot, fd, events)                     \
-     (fd_alloc(pfd, &num_pfd, slot, fd, events))
-#define spfd_alloc(slot, fd, events)                    \
-     (fd_alloc(spfd, &num_spfd, slot, fd, events))
-static inline int
-fd_alloc(struct pollfd array[], int *num, int slot, int fd, short events)
-{
-     if (slot>=MAX_DESC)
-          return -1;
-
-     array[slot].fd=fd;
-     array[slot].events=events;
-     (*num)++;
-     return 0;
-}
-
-#define pfd_find_free_slot() (fd_find_free_slot(pfd))
-#define spfd_find_free_slot() (fd_find_free_slot(spfd))
-static inline int
-fd_find_free_slot(struct pollfd *fd)
-{
-     int i=0;
-     while (i<MAX_DESC
-            && fd->fd>=0)
-     {
-          i++;
-          fd++;
-     }
-
-     return (i==MAX_DESC?-1:i);
-}
-
-#define pfd_is_in_use(slot)                     \
-     (pfd[slot].fd>=0?1:0)
+static long unsigned int hash(struct sockaddr_in *saddr, struct timespec *ts);
 
 int
 wschild_main(const wsd_config_t *cfg)
 {
-     wsd_cfg=cfg;
+     wsd_cfg = cfg;
 
-     if (0 > listen(wsd_cfg->sock, 5))
-     {
-          perror("wschild: listen");
-          exit(1);
+     struct sigaction sac;
+     memset(&sac, 0x0, sizeof(struct sigaction));
+     sac.sa_handler = sigterm;
+     AZ(sigaction(SIGTERM, &sac, NULL));
+
+     memset(&sac, 0, sizeof(sac));
+     sac.sa_handler = SIG_IGN;
+     sac.sa_flags = SA_RESTART;
+     AZ(sigaction(SIGPIPE, &sac, NULL));
+
+     hash_init(ep_hash);
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: endpoint hashtable has %lu entries\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 sizeof ep_hash);
      }
 
-     pfd_init();
-     spfd_init();
+     epfd = epoll_create(1);
+     A(epfd >= 0);
 
-     if (0>ws_conn_init())
-     {
-          perror("wschild: ws_conn_init");
-          exit(1);
-     }
+     AZ(listen(wsd_cfg->lfd, 5));
 
-     if (0>sshmem_conn_init())
-     {
-          perror("wschild: sshmem_conn_init");
-          exit(1);
-     }
-
-     int slot;
-     slot=pfd_find_free_slot();
-     pfd_alloc(slot, wsd_cfg->sock, POLLIN);
-     conn_alloc_http(slot, &pfd_get(slot));
-
-     struct sigaction act;
-     memset(&act, 0x0, sizeof(struct sigaction));
-     act.sa_handler=sigterm;
-     if (0>sigaction(SIGTERM, &act, NULL))
-     {
-          perror("wschild: sigaction");
-          exit(1);
-     }
+     struct epoll_event ev;
+     memset((void*)&ev, 0, sizeof(ev));
+     ev.events = EPOLLIN;
+     ev.data.fd = wsd_cfg->lfd;
+     AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, wsd_cfg->lfd, &ev));
 
      return io_loop();
-}
-
-static int
-on_accept(int fd)
-{
-     int slot;
-     slot=pfd_find_free_slot();
-
-     struct sockaddr_in cl;
-     memset(&cl, 0x0, sizeof(cl));
-
-     int s;
-     socklen_t cl_len=sizeof(struct sockaddr_in);
-     if (0>(s=accept(fd, (struct sockaddr *)&cl, &cl_len)))
-          return -1;
-
-     if (0>slot)
-     {
-          close(s);
-          if (wsd_cfg->verbose)
-               log_addr("wschild: on_accept: %s:%d: fd=%d: slot=%d: no free slot, closing\n",
-                        cl,
-                        s,
-                        slot);
-     }
-     else
-     {
-          pfd_alloc(slot, s, POLLIN);
-          conn_alloc_http(slot, &pfd_get(slot));
-          if (wsd_cfg->verbose)
-               log_addr("wschild: on_accept: %s:%d: fd=%d: slot=%d\n", cl, s, slot);
-     }
-
-     return 0;
-}
-
-static int
-on_write(wsconn_t *conn)
-{
-     buf_flip(conn->buf_out);
-
-     if (LOG_VVERBOSE<=wsd_cfg->verbose)
-          printf("wschild: on_write: fd=%d: %d byte(s)\n",
-                 conn->pfd->fd, buf_len(conn->buf_out));
-
-     if (LOG_VVVERBOSE<=wsd_cfg->verbose)
-          printf("%s\n", buf_ref(conn->buf_out));
-
-     int len;
-     len=write(conn->pfd->fd,
-               buf_ref(conn->buf_out),
-               buf_len(conn->buf_out));
-
-     if (0>len)
-     {
-          if (errno==EAGAIN || errno==EWOULDBLOCK)
-          {
-               buf_flip(conn->buf_out);
-               return 1;
-          }
-
-          return -1;
-     }
-
-     if (0==len)
-          return 0;
-
-     buf_fwd(conn->buf_out, len);
-     buf_compact(conn->buf_out);
-     if (0==buf_pos(conn->buf_out))
-     {
-          /* buffer empty, nothing else to write */
-          conn->pfd->events&=(~POLLOUT);
-
-          if (conn->close_on_write)
-          {
-               if (LOG_VVERBOSE<=wsd_cfg->verbose)
-                    printf("wschild: on_write: fd=%d: close-on-write true and buffer empty\n",
-                           conn->pfd->fd);
-
-               return 0;
-          }
-     }
-
-     return 1;
-}
-
-static int
-on_read(wsconn_t *conn)
-{
-     int len;
-     len=read(conn->pfd->fd,
-              buf_ref(conn->buf_in),
-              buf_len(conn->buf_in));
-
-     if (0>len)
-     {
-          if (errno==EAGAIN || errno==EWOULDBLOCK)
-               return 1;
-
-          return -1;
-     }
-
-     if (0==len)
-          return 0;
-
-     buf_fwd(conn->buf_in, len);
-     if (0>conn->on_read(conn))
-          return 0;
-
-     return 1;
-}
-
-static int
-handle_kernel_event(int num_sel)
-{
-     int rv;
-     int i;
-     for (i=0; i<MAX_DESC; i++)
-     {
-          if (POLLIN&pfd[i].revents)
-          {
-               /* server socket: only ever accept */
-               if (pfd[i].fd==wsd_cfg->sock)
-               {
-                    rv=on_accept(pfd[i].fd);
-                    if (0>rv)
-                    {
-                         perror("wschild: on_accept");
-                         free_conn_and_pfd(i);
-                    }
-               }
-               else
-               {
-                    rv=on_read(&conn[i]);
-                    if (0>=rv)
-                    {
-                         if (rv>0)
-                              perror("wschild: on_read");
-
-                         on_close(&conn[i]);
-                         free_conn_and_pfd(i);
-                    }
-               }
-          }
-
-          if (POLLOUT&pfd[i].revents)
-          {
-               rv=on_write(&conn[i]);
-               if (0 >= rv)
-               {
-                    if (rv > 0)
-                         fprintf(stderr, "wschild: on_write: fd=%d: %s\n",
-                                 conn[i].pfd->fd,
-                                 strerror(errno));
-
-                    on_close(&conn[i]);
-                    free_conn_and_pfd(i);
-               }
-          }
-
-          if ((POLLHUP|POLLERR)&pfd[i].revents)
-          {
-               on_close(&conn[i]);
-               free_conn_and_pfd(i);
-          }
-
-          if (0!=pfd[i].revents)
-               num_sel--;
-          if (!num_sel)
-        break;
-    }
-
-  return 0;
-}
-
-static int
-handle_user_event(int num_sel)
-{
-  int rv;
-  int i;
-  for (i=0; i<MAX_DESC; i++)
-    {
-      if (POLLIN&spfd[i].revents)
-        {
-          rv=sconn[i].on_read(&sconn[i]);
-          if (0 >= rv)
-            {
-              if (0 > rv)
-                fprintf(stderr, "wschild: on_read: fd=%d: %s\n",
-                        sconn[i].pfd->fd,
-                        strerror(errno));
-
-              /* TODO close connection after bad read */
-            }
-        }
-
-      if (POLLOUT&spfd[i].revents)
-        {
-          rv=sconn[i].on_write(&sconn[i]);
-          if (0 >= rv)
-            {
-              if (rv > 0)
-                fprintf(stderr, "wschild: on_write: fd=%d: %s\n",
-                        sconn[i].pfd->fd,
-                        strerror(errno));
-
-              /* ditto */
-            }
-        }
-
-      if ((POLLERR)&spfd[i].revents)
-        {
-          /*on_close(&conn[i]);
-            free_conn_and_pfd(i);*/
-        }
-
-      if (0!=spfd[i].revents)
-        num_sel--;
-      if (!num_sel)
-        break;
-    }
-
-  return 0;
-}
-
-static int
-io_loop()
-{
-  int quantum = DEFAULT_QUANTUM;
-  int rv;
-  while (num_pfd)
-    {
-      rv=poll(pfd, num_pfd, quantum);
-      if (rv<0)
-        {
-          perror("wschild: poll");
-          break;
-        }
-
-      if (0<rv)
-        handle_kernel_event(rv);
-
-      rv=ssys_shmem_poll(spfd, num_spfd, quantum);
-      if (rv<0)
-        {
-          perror("wschild: shmem_poll");
-          break;
-        }
-
-      if (0<rv)
-        handle_user_event(rv);
-    }
-
-  return rv;
 }
 
 static void
 sigterm(int sig)
 {
-  int num_use=0;
-  int i;
-  for (i=0; i < MAX_DESC; i++)
-    {
-      if (pfd_is_in_use(i))
-        {
-          on_close(&conn[i]);
-          free_conn_and_pfd(i);
-          num_use++;
-        }
-    }
-
-  syslog(LOG_INFO, "caught signal, terminating %d client(s)", num_use);
+     done = true;
 }
 
-static void
-free_conn_and_pfd(const int slot)
-{
-  if (LOG_VVERBOSE <= wsd_cfg->verbose)
-    printf("wschild: free_conn_and_pfd: fd=%d: slot=%d\n",
-           pfd_get(slot).fd,
-           slot);
+static int
+io_loop() {
+     struct epoll_event evs[MAX_EVENTS];
+     memset((void*)&evs, 0, sizeof(evs));
 
-  if (0>close(pfd_get(slot).fd))
-    perror("wschild: close");
+     while (!done) {
+          int nfd = epoll_wait(epfd, evs, MAX_EVENTS, DEFAULT_QUANTUM);
+          if (0 > nfd && EINTR == errno)
+               continue;
+          A(nfd >= 0);
+          A(nfd <= MAX_EVENTS);
 
-  pfd_free(slot);
-  conn_free(slot);
+          int n;
+          for (n = 0; n < nfd; ++n) {
+
+               if (evs[n].data.fd == wsd_cfg->lfd) {
+                    AZ(sock_accept(evs[n].data.fd));
+                    continue;
+               }
+
+               if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+                    printf("%s:%d: %s: nfd=%d, events=0x%x\n",
+                           __FILE__,
+                           __LINE__,
+                           __func__,
+                           nfd,
+                           evs[n].events);
+               }
+
+               ep_t *ep = (ep_t*)evs[n].data.ptr;
+               if (evs[n].events & EPOLLIN ||
+                   evs[n].events & EPOLLPRI) {
+                    int rv = ep->read(ep);
+                    if (0 > rv) {
+                         AZ(ep->close(ep));
+                    } else {
+                         A(0 <= rv);
+
+                         if (0 == buf_read_sz(ep->snd_buf))
+                              continue;
+
+                         struct epoll_event ev;
+                         memset(&ev, 0, sizeof(ev));
+                         ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
+                         ev.data.ptr = ep;
+                         AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
+                    }
+               } else if (evs[n].events & EPOLLOUT) {
+                    int rv = ep->write(ep);
+                    if (0 > rv) {
+                         AZ(ep->close(ep));
+                    } else {
+                         A(0 <= rv);
+                    }
+               } else if (evs[n].events & EPOLLHUP ||
+                          evs[n].events & EPOLLRDHUP ||
+                          evs[n].events & EPOLLERR) {
+                    AZ(ep->close(ep));
+               }
+          }
+     }
+
+     int bkt, num = 0;
+     ep_t *ep;
+     hash_for_each(ep_hash, bkt, ep, hash_node) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: closing fd=%d\n", __func__, ep->fd);
+          }
+
+          AN(ep->close);
+          AZ(ep->close(ep));
+
+          if (ep->proto.close)
+               AZ(ep->proto.close());
+
+          num++;
+     }
+     AZ(close(wsd_cfg->lfd));
+     num++;
+     syslog(LOG_INFO, "closed %d socket(s)", num);
+
+     return 0;
 }
 
-static void
-on_close(wsconn_t *conn)
+static int
+sock_accept(int lfd)
 {
-  if (wsd_cfg->verbose)
-    printf("wschild: on_close: fd=%d\n", conn->pfd->fd);
+     struct sockaddr_in saddr;
+     memset(&saddr, 0x0, sizeof(saddr));
 
-  if (conn->on_close)
-    conn->on_close(conn);
+     socklen_t saddr_len = sizeof(saddr);
+     int fd = accept4(lfd,
+                      (struct sockaddr *)&saddr,
+                      &saddr_len,
+                      SOCK_NONBLOCK);
+     A(fd >= 0);
+
+     struct epoll_event ev;
+     memset(&ev, 0, sizeof(ev));
+     ev.events = EPOLLIN | EPOLLRDHUP;
+     ev.data.ptr = malloc(sizeof(ep_t));
+     A(ev.data.ptr);
+
+     memset(ev.data.ptr, 0, sizeof(ep_t));
+     ep_t *ep = (ep_t*)ev.data.ptr;
+     ep->fd = fd;
+     ep->read = sock_read;
+     ep->write = sock_write;
+     ep->close = sock_close;
+     ep->proto.recv = http_recv;
+     ep->proto.handshake = ws_handshake;
+     ep->snd_buf = malloc(sizeof(buf2_t));
+     A(ep->snd_buf);
+     memset(ep->snd_buf, 0, sizeof(buf2_t));
+     ep->rcv_buf = malloc(sizeof(buf2_t));
+     A(ep->rcv_buf);
+     memset(ep->rcv_buf, 0, sizeof(buf2_t));
+
+     struct timespec ts;
+     memset((void*)&ts, 0, sizeof(ts));
+     AZ(clock_gettime(CLOCK_REALTIME_COARSE, &ts));
+     ep->hash = hash(&saddr, &ts);
+     AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
+
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, hash=0x%lx\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 fd,
+                 ep->hash);
+     }
+
+     return 0;
 }
 
-int
-wschild_register_user_fd(int fd,
-                         int (*on_read)(struct wsconn *conn),
-                         int (*on_write)(struct wsconn *conn),
-                         short events)
+static int
+sock_read(ep_t *ep)
 {
-  int slot=spfd_find_free_slot();
-  if (slot<0)
-    return slot;
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {     
+          printf("%s:%d: %s: ep->fd=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd);
+     }
 
-  spfd_alloc(slot, fd, events);
-  conn_alloc_sshmem(slot, &spfd_get(slot), on_read, on_write);
+     AN(buf_write_sz(ep->rcv_buf));
+     int len = read(ep->fd, ep->rcv_buf->p, buf_write_sz(ep->rcv_buf));
+     ERRET(0 > len, "read");
 
-  return 0;
+     /* EOF */
+     if (0 == len)
+          return (-1);
+
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("\t%s: read %d byte(s)\n", __func__, len);
+     }
+
+     ep->rcv_buf->wrpos += len;
+     AN(ep->proto.recv);
+     return ep->proto.recv(ep);
 }
 
-struct wsconn*
-wschild_lookup_kernel_fd(int fd)
+static int
+sock_write(ep_t *ep)
 {
-  int i;
-  for (i=0; i < MAX_CONN; i++)
-    {
-      if (conn[i].pfd)
-        if (conn[i].pfd->fd == fd)
-          return &conn[i];
-    }
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, read_sz=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 buf_read_sz(ep->snd_buf));
+     }
 
-  return NULL;
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+          ep->snd_buf->p[ep->snd_buf->wrpos] = '\0';
+          printf("%s\n", &ep->snd_buf->p[ep->snd_buf->rdpos]);
+     }
+
+     A(ep->fd >= 0);
+     A(buf_read_sz(ep->snd_buf) > 0);
+     int len = write(ep->fd, ep->snd_buf->p, buf_read_sz(ep->snd_buf));
+     if (0 < len) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: wrote %d byte(s)\n", __func__, len);
+          }
+
+          ep->snd_buf->rdpos += len;
+          AZ(buf_read_sz(ep->snd_buf));
+          buf_reset(ep->snd_buf);
+
+          if (0 == ep->snd_buf->rdpos) {
+               struct epoll_event ev;
+               memset(&ev, 0, sizeof(ev));
+               ev.events = EPOLLIN | EPOLLRDHUP;
+               ev.data.ptr = ep;
+               AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
+
+               if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+                    printf("\t%s: removing EPOLLOUT: fd=%d\n",
+                           __func__,
+                           ep->fd);
+               }
+
+               if (ep->close_on_write) {
+                    if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+                         printf("\t%s: close-on-write: fd=%d\n",
+                                __func__,
+                                ep->fd);
+                    }
+                    sock_close(ep);
+               }
+          }
+     } else {
+          A(0 > len);
+     }
+
+     return len;
+}
+
+static int sock_close(ep_t *ep)
+{
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, write_sz=%d, read_size=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 buf_write_sz(ep->snd_buf),
+                 buf_write_sz(ep->rcv_buf));
+     }
+
+     A(ep->hash != 0L);
+     A(ep->fd >= 0);
+     A(ep->close != NULL);
+     A(ep->read != NULL);
+     A(ep->write != NULL);
+     AZ(close(ep->fd));
+
+     if (hash_hashed(&ep->hash_node)) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: fd=%d: removing from hashtable\n",
+                      __func__,
+                      ep->fd);
+          }
+          hash_del(&ep->hash_node);
+     }
+
+     free(ep);
+
+     return 0;
+}
+
+static long unsigned int
+hash(struct sockaddr_in *saddr, struct timespec *ts) {
+     long unsigned int h = saddr->sin_addr.s_addr;
+     h <<= 16;
+     h |= saddr->sin_port;
+     h <<= 16;
+     h |= ((ts->tv_nsec &0x00000000ffff0000 >> 16));
+     return h;
 }

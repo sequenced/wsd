@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.67])
-AC_INIT([wsd], [0.11], [bugs@sequencedsystems.com])
+AC_INIT([wsd], [0.12], [bugs@sequencedsystems.com])
 AC_CONFIG_SRCDIR([src/wsd.c])
 AM_INIT_AUTOMAKE([-Wall -Werror])
 AM_PROG_CC_C_O
@@ -31,12 +31,8 @@ AC_PROG_LN_S
 
 # Checks for libraries.
 AC_CHECK_LIB(crypto, BIO_f_base64,, AC_MSG_FAILURE(cannot find libcrypto))
-AC_CHECK_LIB(sshmem, ssys_shmem_open,, AC_MSG_FAILURE(cannot find libsshmem))
-AC_CHECK_LIB(rt, shm_open,, AC_MSG_FAILURE(cannot find librt))
-AC_CHECK_LIB(dl, dlopen,, AC_MSG_FAILURE(cannot find libdl))
 
 # Checks for header files.
-AC_CHECK_HEADER(sshmem_api.h,, AC_MSG_FAILURE(cannot find sshmem_api.h))
 AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netinet/in.h stddef.h stdlib.h string.h sys/socket.h sys/time.h syslog.h unistd.h endian.h openssl/sha.h dlfcn.h])
 
 # Checks for typedefs, structures, and compiler characteristics.

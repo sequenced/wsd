@@ -1,8 +1,6 @@
 #include <string.h>
 #include <stdio.h>
-#include <poll.h>
 #include <errno.h>
-#include "ws.h"
 #include "http.h"
 #include "parser.h"
 
@@ -22,73 +20,73 @@ static int found_upgrade(string_t *result);
 static int tokenise_connection(string_t *s);
 
 int
-http_on_read(wsconn_t *conn)
+http_recv(ep_t *ep)
 {
-     buf_flip(conn->buf_in);
+     AN(buf_read_sz(ep->rcv_buf));
 
-     if (LOG_VVERBOSE == wsd_cfg->verbose)
-          printf("http: on_read: fd=%d: %d byte(s)\n",
-                 conn->pfd->fd,
-                 buf_len(conn->buf_in));
-     else if (LOG_VVVERBOSE == wsd_cfg->verbose)
-          printf("http: on_read: fd=%d: %s",
-                 conn->pfd->fd,
-                 buf_ref(conn->buf_in));
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, read_sz=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 buf_read_sz(ep->rcv_buf));
+     }
+
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+          ep->rcv_buf->p[ep->rcv_buf->wrpos] = '\0';
+          printf("%s\n", &ep->rcv_buf->p[ep->rcv_buf->rdpos]);
+     }
 
      int rv;
      string_t t;
-     bzero(&t, sizeof(string_t));
+     memset(&t, 0x0, sizeof(string_t));
 
      /* Tokenise start line ... */
-     if (0 > (rv = http_header_tok(buf_ref(conn->buf_in), &t)))
-     {
-          if (LOG_VVERBOSE == wsd_cfg->verbose)
-               printf("http_header_tok: errno=%d\n", errno);
-
-          if (EUNEXPECTED_EOS == errno)
-          {
-               /* not enough data */
-               buf_flip(conn->buf_in);
-               /* try again */
-               return 1;
+     if (0 > (rv = http_header_tok(&ep->rcv_buf->p[ep->rcv_buf->rdpos], &t))) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: errno=%d\n", __func__, errno);
           }
-          
+
+          if (EUNEXPECTED_EOS == errno) {
+               /* not enough data, try again */
+               return 0;
+          }
+
           return (-1);
      }
 
      http_req_t hr;
-     bzero(&hr, sizeof(http_req_t));
+     memset(&hr, 0x0, sizeof(http_req_t));
 
      /* ... parse status line, see whether or not it's a request ... */
-     if (0 > (rv = parse_request_line(&t, &hr)))
-     {
-          if (LOG_VVERBOSE == wsd_cfg->verbose)
-               printf("parse_request_line: errno=%d\n", errno);
+     if (0 > (rv = parse_request_line(&t, &hr))) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: errno=%d\n", __func__, errno);
+          }
 
-          if (0 > http_prepare_response(conn->buf_out, HTTP_400))
+          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
                return (-1);
 
           goto error;
      }
 
      /* ... validate request line ... */
-     if (!is_valid_req_line(&hr))
-     {
-          if (0 > http_prepare_response(conn->buf_out, HTTP_400))
+     if (!is_valid_req_line(&hr)) {
+          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
                return (-1);
 
           goto error;
      }
 
      /* ... tokenise and parse header fields ... */
-     while (0 < (rv = http_header_tok(NULL, &t)))
-     {
-          if (0 > (rv = parse_header_field(&t, &hr)))
-          {
-               if (LOG_VVERBOSE == wsd_cfg->verbose)
-                    printf("parse_header_field: errno=%d\n", errno);
+     while (0 < (rv = http_header_tok(NULL, &t))) {
+          if (0 > (rv = parse_header_field(&t, &hr))) {
+               if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+                    printf("\t%s: errno=%d\n", __func__, errno);
+               }
 
-               if (0 > http_prepare_response(conn->buf_out, HTTP_400))
+               if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
                     return (-1);
 
                goto error;
@@ -96,66 +94,56 @@ http_on_read(wsconn_t *conn)
      }
 
      /* ... and finally, validate HTTP-related fields. */
-     if (!is_valid_host_header_field(&hr))
-     {
-          if (LOG_VVERBOSE == wsd_cfg->verbose)
-               printf("invalid host header field\n");
+     if (!is_valid_host_header_field(&hr)) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: invalid host header field\n", __func__);
+          }
 
           /* Implementing as MUST; see RFC7230, section 5.4 and
            * RFC6455, section 4.1
            */
-          if (0 > http_prepare_response(conn->buf_out, HTTP_400))
+          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
                return (-1);
 
           goto error;
      }
 
-     if (!is_valid_upgrade_header_field(&hr))
-     {
-          if (LOG_VVERBOSE == wsd_cfg->verbose)
-               printf("invalid upgrade header field\n");
+     if (!is_valid_upgrade_header_field(&hr)) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: invalid upgrade header field\n", __func__);
+          }
 
-          if (0 > http_prepare_response(conn->buf_out, HTTP_400))
+          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
                return (-1);
 
           goto error;
      }
      
-     if (!is_valid_connection_header_field(&hr))
-     {
-          if (LOG_VVERBOSE == wsd_cfg->verbose)
-               printf("invalid connection header field\n");
+     if (!is_valid_connection_header_field(&hr)) {
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: invalid connection header field\n", __func__);
+          }
 
-          if (0 > http_prepare_response(conn->buf_out, HTTP_400))
+          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
                return (-1);
 
           goto error;
      }
 
-     if (0 > conn->on_handshake(conn, &hr))
-          return -1;
-
-     return 1;
+     return ep->proto.handshake(ep, &hr);
 
 error:
-     buf_clear(conn->buf_in);
-     conn->pfd->events|=POLLOUT;
-     conn->close_on_write = 1;
+     buf_reset(ep->rcv_buf);
+     ep->close_on_write = 1;
 
-     return 1;
-}
-
-int
-http_on_write(wsconn_t *conn)
-{
-     return -1;
+     return 0;
 }
 
 static int
 is_valid_req_line(http_req_t *hr)
 {
-     if (hr->method.len == 3 &&
-         0 != strncmp(hr->method.start, METHOD_GET, hr->method.len))
+     if (hr->method.len == 3
+         && 0 != strncmp(hr->method.start, METHOD_GET, hr->method.len))
           return 0;
 
      /* HTTP-version checked as side-effect of parsing request line */
@@ -174,16 +162,18 @@ is_valid_req_line(http_req_t *hr)
 }
 
 int
-http_prepare_response(buf_t *b, const char *s)
+http_prepare_response(buf2_t *b, const char *s)
 {
+     size_t len = strlen(s);
+
      /* see RFC2616 section 6.1.1 */
-     if (buf_len(b)<(strlen(s)))
-          return -1;
+     if (buf_write_sz(b) < len)
+          return (-1);
 
-     strcpy(buf_ref(b), s);
-     buf_fwd(b, strlen(s));
+     strcpy(&b->p[b->wrpos], s);
+     b->wrpos += len;
 
-     return 1;
+     return 0;
 }
 
 static int
@@ -202,8 +192,7 @@ is_valid_upgrade_header_field(http_req_t *hr)
 {
      string_t result;
      
-     while (0 < http_field_value_tok(&hr->upgrade, &result))
-     {
+     while (0 < http_field_value_tok(&hr->upgrade, &result)) {
           trim(&result);
           if (0 == strncasecmp("websocket", result.start, 9))
                return 1;
