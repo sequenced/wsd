@@ -31,15 +31,15 @@ static void init_rcv_pipe();
 /*
  * JSON rpc frame layout:
  *
- * 0th byte           8th byte          ...
- * +------------------+------------------+
- * | sender reference | JSON rpc payload |
- * +------------------+------------------+
+ * 0th byte           8th byte        nth byte  n+1 byte
+ * +------------------+------------------+---------+
+ * | sender reference | JSON rpc payload |   0x0   | 
+ * +------------------+------------------+---------+
  *
  */
 
 int
-jen_data_frame(ep_t *ep, wsframe_t *wsf)
+jen_recv_data_frame(ep_t *ep, wsframe_t *wsf)
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           printf("%s:%d: %s: fd=%d\n",
@@ -50,16 +50,25 @@ jen_data_frame(ep_t *ep, wsframe_t *wsf)
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          ep->rcv_buf->p[ep->rcv_buf->wrpos] = '\0';
+          char rpl = ep->rcv_buf->p[ep->rcv_buf->rdpos + wsf->payload_len];
+          ep->rcv_buf->p[ep->rcv_buf->rdpos + wsf->payload_len] = '\0';
           printf("%s\n", &ep->rcv_buf->p[ep->rcv_buf->rdpos]);
+          ep->rcv_buf->p[ep->rcv_buf->rdpos + wsf->payload_len] = rpl;
      }
 
-     A(buf_write_sz(snd_pipe->snd_buf) > sizeof(long unsigned int));
+     /* hash + frame length + '\0' */
+     int len = sizeof(long unsigned int) + wsf->payload_len + 1;
+     if (buf_write_sz(snd_pipe->snd_buf) < len)
+          return (-1);
+
      buf_put(snd_pipe->snd_buf, ep->hash);
-     
-     while (buf_write_sz(snd_pipe->snd_buf) && buf_read_sz(ep->rcv_buf))
+
+     int k = wsf->payload_len;
+     while (k-- && buf_read_sz(ep->rcv_buf))
           snd_pipe->snd_buf->p[snd_pipe->snd_buf->wrpos++] =
                ep->rcv_buf->p[ep->rcv_buf->rdpos++];
+
+     buf_put(snd_pipe->snd_buf, (char)'\0');
 
      AZ(buf_read_sz(ep->rcv_buf));
      buf_reset(ep->rcv_buf);
@@ -79,10 +88,10 @@ int
 jen_close()
 {
      if (snd_pipe && 0 < snd_pipe->fd)
-          AZ(close(snd_pipe->fd));
+          AZ(pipe_close(snd_pipe));
 
      if (rcv_pipe && 0 < rcv_pipe->fd)
-          AZ(close(rcv_pipe->fd));
+          AZ(pipe_close(rcv_pipe));
 
      return 0;
 }
@@ -153,93 +162,6 @@ jen_open()
      return 0;
 }
 
-/* int */
-/* jen_on_shmem_read(wsconn_t *conn) */
-/* { */
-  /* buf_clear(conn->buf_in); */
-
-  /* int len; */
-  /* len=ssys_shmem_read(conn->sfd, */
-  /*                     buf_ref(conn->buf_in), */
-  /*                     buf_len(conn->buf_in)); */
-
-  /* if (0 > len) */
-  /*   return (-1); */
-
-  /* if (0 == len) */
-  /*   return 0; */
-
-  /* /\* TODO Clean-up hacky access of first eight bytes. *\/ */
-  /* int fd; */
-  /* fd=(int)buf_get_long(conn->buf_in); */
-
-  /* wsconn_t *dst; */
-  /* dst=wsd_cfg->lookup_kernel_fd(fd); */
-  /* if (!dst) */
-  /*   return (-1); */
-
-  /* /\* jen protocol exchanges null-terminated strings: find null byte *\/ */
-  /* int j=0; */
-  /* char *s=buf_ref(conn->buf_in); */
-  /* while (*s++ != '\0') */
-  /*   j++; */
-
-  /* len=j; */
-
-  /* buf_fwd(conn->buf_in, len); */
-  /* buf_flip(conn->buf_in); */
-  /* buf_get_long(conn->buf_in); /\* TODO Make repetitive read unnecessary. *\/ */
-
-  /* if (LOG_VVERBOSE == wsd_cfg->verbose) */
-  /*   printf("jen: on_shmem_read: fd=%d: dst_fd=%d: %d byte(s)\n", */
-  /*          conn->fd, */
-  /*          dst->fd, */
-  /*          len); */
-  /* else if (LOG_VVVERBOSE == wsd_cfg->verbose) */
-  /*   { */
-  /*     printf("jen: fd=%d: dst_fd=%d: ", conn->fd, dst->fd); */
-  /*     int old=buf_len(conn->buf_in); */
-
-  /*     while (0<buf_len(conn->buf_in)) */
-  /*       printf("%c", buf_get(conn->buf_in)); */
-  /*     printf("\n"); */
-
-  /*     buf_rwnd(conn->buf_in, old); */
-  /*   } */
-
-  /* long frame_len=wsapp_calculate_frame_length(len); */
-  /* if (0>frame_len) */
-  /*   { */
-  /*     if (LOG_VVVERBOSE <= wsd_cfg->verbose) */
-  /*       printf("jen: fd=%d: negative frame length, discarding data\n", */
-  /*              conn->fd); */
-
-  /*     return 0; */
-  /*   } */
-
-  /* if (buf_len(dst->buf_out)<frame_len) */
-  /*   { */
-  /*     if (LOG_VVVERBOSE <= wsd_cfg->verbose) */
-  /*       printf("jen: fd=%d: output buffer too small, discarding data\n", */
-  /*              conn->fd); */
-
-  /*     return 0; */
-  /*   } */
-
-  /* char byte1=0; */
-  /* wsapp_set_fin_bit(byte1); */
-  /* wsapp_set_opcode(byte1, WS_TEXT_FRAME); */
-  /* buf_put(dst->buf_out, byte1); */
-  /* wsapp_set_payload_len(dst->buf_out, len); */
-
-  /* while (0<buf_len(conn->buf_in)) */
-  /*   buf_put(dst->buf_out, buf_get(conn->buf_in)); */
-
-  /* dst->write = 1; */
-
-/*   return 1; */
-/* } */
-
 static int
 pipe_write(ep_t *ep)
 {
@@ -257,9 +179,8 @@ pipe_write(ep_t *ep)
      int len = write(ep->fd, ep->snd_buf->p, buf_read_sz(ep->snd_buf));
      if (0 < len) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {          
-               printf("\t%s: fd=%d: wrote %d byte(s)\n",
+               printf("\t%s: wrote %d byte(s)\n",
                       __func__,
-                      ep->fd,
                       len);
           }
 
@@ -274,7 +195,7 @@ pipe_write(ep_t *ep)
           AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
 
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s: removing EPOLLOUT: fd=%d\n", __func__, ep->fd);
+               printf("\t%s: removing EPOLLOUT\n", __func__);
           }
      } else {
           A(0 > len);
@@ -323,7 +244,7 @@ pipe_read(ep_t *ep)
      AZ(ep->rcv_buf->wrpos);
      int len = read(ep->fd, ep->rcv_buf->p, buf_write_sz(ep->rcv_buf));
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("\t%s: fd=%d: read %d byte(s)\n", __func__, ep->fd, len);
+          printf("\t%s: read %d byte(s)\n", __func__, len);
      }
      ERRET(0 > len, "read");
 
@@ -343,28 +264,19 @@ pipe_read(ep_t *ep)
      }
 
      if (NULL == sock) {
-          printf("\tsocket went way: dropping %d byte(s)\n",
-                 buf_read_sz(ep->rcv_buf));
-          /* Socket went away; drop data on the floor */
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: hash=0x%lx: socket closed: dropping %d byte(s)\n",
+                      __func__,
+                      hash,
+                      buf_read_sz(ep->rcv_buf));
+          }
+          /* Socket closed; drop data on the floor */
           buf_reset(ep->rcv_buf);
 
           return 0;
      }
 
-     while (buf_write_sz(sock->snd_buf) && buf_read_sz(ep->rcv_buf))
-          sock->snd_buf->p[sock->snd_buf->wrpos++] =
-               ep->rcv_buf->p[ep->rcv_buf->rdpos++];
-     AZ(buf_read_sz(ep->rcv_buf));
-     buf_reset(ep->rcv_buf);
-
-     struct epoll_event ev;
-     memset(&ev, 0, sizeof(ev));
-     ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
-     ev.data.ptr = sock;
-
-     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, sock->fd, &ev));
-
-     return 0;
+     return sock->proto.send_data_frame(sock, ep);
 }
 
 static void

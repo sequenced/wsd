@@ -1,13 +1,14 @@
 #include "config.h"
 #include <string.h>
-#include <poll.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <limits.h>
 #ifdef HAVE_ENDIAN_H
 #include <endian.h>
 #else
 /* TODO */
 #endif
+#include <sys/epoll.h>
 #include <sys/types.h>
 #include <openssl/sha.h>
 #include <openssl/bio.h>
@@ -31,16 +32,22 @@
 #define WS_VER                "Sec-WebSocket-Version: "
 #define WS_PROTO              "Sec-WebSocket-Protocol: "
 
-#define FIN_BIT(byte) (0x80&byte)
-#define SET_FIN_BIT(byte) (byte |= 0x80)
-#define RSV1_BIT(byte) (0x40&byte)
-#define RSV2_BIT(byte) (0x20&byte)
-#define RSV3_BIT(byte) (0x10&byte)
-#define OPCODE(byte) (0xf&byte)
-#define SET_OPCODE(byte, val) (byte |= (0xf&val))
-#define MASK_BIT(byte) (0x80&byte)
-#define PAYLOAD_LEN(byte) (unsigned long)(0x7f&byte)
-#define SET_PAYLOAD_LEN(byte, val) (byte |= (0x7f&val))
+/* see RFC6455 section 5.2 */
+#define WS_PAYLOAD_7BITS       1
+#define WS_PAYLOAD_7PLUS16BITS 2
+#define WS_PAYLOAD_7PLUS64BITS 9
+
+#define fin_bit(byte)               (0x80 & byte)
+#define set_fin_bit(byte)           (byte |= 0x80)
+#define RSV1_BIT(byte)              (0x40 & byte)
+#define RSV2_BIT(byte)              (0x20 & byte)
+#define RSV3_BIT(byte)              (0x10 & byte)
+#define OPCODE(byte)                (0xf & byte)
+#define set_opcode(byte, val)       (byte |= (0xf & val))
+#define MASK_BIT(byte)              (0x80 & byte)
+#define set_payload_bits(byte, val) (byte |= (0x7f & val))
+#define PAYLOAD_LEN(byte)           (unsigned long)(0x7f & byte)
+#define SET_PAYLOAD_LEN(byte, val)  (byte |= (0x7f & val))
 /* #define PAYLOAD_LEN16(frame)                                            \ */
 /*   ((unsigned long int)be16toh(*(unsigned short*)(frame->byte3))) */
 /* #define PAYLOAD_LEN64(frame)                                    \ */
@@ -50,6 +57,8 @@
 /* #define MASKING_KEY64(frame) (unsigned int)*(unsigned int*)(frame->byte11) */
 
 extern const wsd_config_t *wsd_cfg;
+
+extern int epfd;
 
 static const char *FLD_SEC_WS_VER_VAL = "13";
 
@@ -65,6 +74,8 @@ static int pong_frame(ep_t *b, wsframe_t *wsf);
 static int start_closing_handshake(ep_t *ep, wsframe_t *wsf, int status);
 static int prepare_close_frame(buf2_t *b, int status);
 static int dispatch(ep_t *ep, wsframe_t *wsf);
+static int set_payload_len(buf2_t *b, const unsigned long payload_len);
+static long calculate_frame_length(const unsigned long len);
 
 static int
 is_valid_ver(http_req_t *hr)
@@ -192,8 +203,9 @@ ws_handshake(ep_t *ep, http_req_t *hr)
 
      /* "switch" into websocket mode */
      ep->proto.recv = ws_recv;
-     ep->proto.data_frame = jen_data_frame;
+     ep->proto.recv_data_frame = jen_recv_data_frame;
      ep->proto.open = jen_open;
+     ep->proto.send_data_frame = ws_send_data_frame;
 
      if (0 > ep->proto.open()) {
           goto bad;
@@ -209,6 +221,67 @@ bad:
 
 ok:
      buf_reset(ep->rcv_buf);
+
+     return 0;
+}
+
+int
+ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
+{
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: dst_fd=%d, src_fd=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 dst->fd,
+                 src->fd);
+     }
+
+     unsigned long rdpos = src->rcv_buf->rdpos;
+     AN(rdpos);
+     while (buf_read_sz(src->rcv_buf) && '\0' != src->rcv_buf->p[rdpos++]);
+     A(src->rcv_buf->rdpos < rdpos);
+     unsigned long payload_len = rdpos - src->rcv_buf->rdpos;
+     long frame_len = calculate_frame_length(payload_len);
+     A(0 < frame_len);
+
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("\t%s: frame_len=%d, payload_len=%lu\n",
+                 __func__,
+                 frame_len,
+                 payload_len);
+     }
+
+     if (buf_write_sz(dst->snd_buf) < frame_len) {
+          /* Destination buffer too small, drop data */
+          src->rcv_buf->rdpos += payload_len;
+          if (0 == buf_read_sz(src->rcv_buf))
+               buf_reset(src->rcv_buf);
+
+          return 0;
+     }
+
+     char byte1 = 0;
+     set_fin_bit(byte1);
+     set_opcode(byte1, WS_TEXT_FRAME);
+     buf_put(dst->snd_buf, byte1);
+     AZ(set_payload_len(dst->snd_buf, payload_len));
+
+     unsigned long k = payload_len;
+     while (k--) {
+          dst->snd_buf->p[dst->snd_buf->wrpos++] =
+               src->rcv_buf->p[src->rcv_buf->rdpos++];
+     }
+
+     if (0 == buf_read_sz(src->rcv_buf))
+          buf_reset(src->rcv_buf);
+
+     struct epoll_event ev;
+     memset(&ev, 0, sizeof(ev));
+     ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
+     ev.data.ptr = dst;
+
+     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, dst->fd, &ev));
 
      return 0;
 }
@@ -253,9 +326,8 @@ ws_recv(ep_t *ep)
      }
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("\t%s: fd=%d, frame: 0x%hhx, 0x%hhx, opcode=0x%x, len=%lu\n",
+          printf("\t%s: byte1=0x%hhx, byte2=0x%hhx, opcode=0x%x, len=%lu\n",
                  __func__,
-                 ep->fd,
                  wsf.byte1,
                  wsf.byte2,
                  OPCODE(wsf.byte1),
@@ -295,7 +367,7 @@ dispatch(ep_t *ep, wsframe_t *wsf)
      else if (0x0 == OPCODE(wsf->byte1)
               || WS_TEXT_FRAME == OPCODE(wsf->byte1)
               || WS_BINARY_FRAME == OPCODE(wsf->byte1))
-          rv = ep->proto.data_frame(ep, wsf);
+          rv = ep->proto.recv_data_frame(ep, wsf);
      else {
           if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
                printf("\t%s: unknown opcode: fd=%d: 0x%x\n",
@@ -307,10 +379,6 @@ dispatch(ep_t *ep, wsframe_t *wsf)
           /* unknown opcode */
           rv = start_closing_handshake(ep, wsf, WS_1011);
      }
-
-/*      /\* clear buffer by consuming this frame's payload *\/ */
-/*      buf_fwd(conn->buf_in, wsf->payload_len); */
-/*      buf_compact(conn->buf_in); */
 
      return rv;
 }
@@ -444,8 +512,8 @@ prepare_close_frame(buf2_t *b, int status)
           return -1;
 
      char byte1 = 0, byte2 = 0;
-     SET_FIN_BIT(byte1);
-     SET_OPCODE(byte1, WS_CLOSE_FRAME);
+     set_fin_bit(byte1);
+     set_opcode(byte1, WS_CLOSE_FRAME);
 
      if (0 < status)
           /* echo back status code; see RFC6455 section 5.5.1 */
@@ -491,4 +559,52 @@ is_valid_proto(http_req_t *hr)
           return 0;
 
      return 1;
+}
+
+long
+calculate_frame_length(const unsigned long len)
+{
+     if (len < 126) {
+          return WS_PAYLOAD_7BITS + len;
+     } else if (len <= USHRT_MAX) {
+          return WS_PAYLOAD_7PLUS16BITS + len;
+     } else if (len <= (ULONG_MAX >> 1)) {
+          return WS_PAYLOAD_7PLUS64BITS + len;
+     }
+
+     return (-1L);
+}
+
+int
+set_payload_len(buf2_t *b, const unsigned long payload_len)
+{
+     char byte2 = 0;
+
+     if (buf_write_sz(b) < 1)
+          return (-1);
+
+     if (payload_len < 126) {
+          set_payload_bits(byte2, payload_len);
+          buf_put(b, byte2);
+     } else if (payload_len <= USHRT_MAX) {
+          set_payload_bits(byte2, 126);
+          buf_put(b, byte2);
+
+          if (buf_write_sz(b) < 2)
+               return (-1);
+
+          buf_put(b, (short)htobe16(payload_len));
+     } else if (payload_len <= (ULONG_MAX>>1)) {
+          set_payload_bits(byte2, 127);
+          buf_put(b, byte2);
+
+          if (buf_write_sz(b) < 8)
+               return (-1);
+
+          buf_put(b, (unsigned long)htobe64(payload_len));
+     } else {
+          return (-1);
+     }
+
+     return 0;
 }

@@ -14,5 +14,6 @@
 
 int ws_handshake(ep_t *ep, http_req_t *hr);
 int ws_recv(ep_t *ep);
+int ws_send_data_frame(struct endpoint *dst, struct endpoint *src);
 
 #endif /* #ifndef __WS_H__ */

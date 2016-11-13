@@ -74,10 +74,10 @@ struct endpoint;
 
 typedef struct {
      int (*recv)(struct endpoint *ep);
-     int (*send)(struct endpoint *ep);
      int (*handshake)(struct endpoint *ep, http_req_t *hr);
      int (*open)();
-     int (*data_frame)(struct endpoint *ep, wsframe_t *wsf);
+     int (*send_data_frame)(struct endpoint *dst, struct endpoint *src);
+     int (*recv_data_frame)(struct endpoint *ep, wsframe_t *wsf);
      int (*close)();
 } proto_t;
 
