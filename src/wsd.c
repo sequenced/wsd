@@ -17,28 +17,32 @@
 
 static const char *ident = "wsd";
 static int drop_priv(uid_t new_uid);
-static int open_socket(int p);
+static int sock_init(int port);
 
 int
 main(int argc, char **argv)
 {
      int opt;
-     int port_arg = 6084; /* default */
+     int port_arg = 6084;                 /* default */
      int no_fork_arg = 0;
      int verbose_arg = 0;
-     const char *host_arg = NULL;
+     const char *fwd_port_arg = "6085";   /* default */
+     const char *fwd_hostname_arg = NULL;
      const char *user_arg = NULL;
 
-     while ((opt = getopt(argc, argv, "h:p:u:dv")) != -1) {
+     while ((opt = getopt(argc, argv, "h:p:f:u:dv")) != -1) {
           switch (opt) {
           case 'h':
-               host_arg = optarg;
+               fwd_hostname_arg = optarg;
                break;
           case 'u':
                user_arg = optarg;
                break;
           case 'p':
                port_arg = atoi(optarg);
+               break;
+          case 'f':
+               fwd_port_arg = optarg;
                break;
           case 'd':
                no_fork_arg = 1;
@@ -52,30 +56,33 @@ main(int argc, char **argv)
           }
      }
 
-     if (NULL == host_arg)
-          host_arg = "127.0.0.1";
+     if (NULL == fwd_hostname_arg)
+          fwd_hostname_arg = "127.0.0.1";
 
      if (NULL == user_arg)
           user_arg = "wsd";
 
      struct passwd *pwent;
      if (NULL == (pwent = getpwnam(user_arg))) {
-          fprintf(stderr, "wsd: unknown user: %s\n", user_arg);
+          fprintf(stderr, "%s: unknown user: %s\n", argv[0], user_arg);
           exit(1);
      }
 
      if (0 == pwent->pw_uid) {
-          fprintf(stderr, "wsd: daemon user can't be root\n");
+          fprintf(stderr, "%s: daemon user can't be root\n", argv[0]);
           exit(1);
      }
 
      wsd_config_t cfg;
      memset(&cfg, 0x0, sizeof(wsd_config_t));
      cfg.uid = pwent->pw_uid;
-     cfg.username = malloc(strlen(pwent->pw_name)+1);
-     A(cfg.username);
-     strcpy(cfg.username, pwent->pw_name);
      cfg.port = port_arg;
+     cfg.fwd_port = malloc(strlen(fwd_port_arg) + 1);
+     A(cfg.fwd_port);
+     strcpy(cfg.fwd_port, fwd_port_arg);
+     cfg.fwd_hostname = malloc(strlen(fwd_hostname_arg) + 1);
+     A(cfg.fwd_hostname);
+     strcpy(cfg.fwd_hostname, fwd_hostname_arg);
      cfg.verbose = verbose_arg;
      cfg.no_fork = no_fork_arg;
 
@@ -102,7 +109,7 @@ main(int argc, char **argv)
                close(STDERR_FILENO);
           }
 
-          ERREXIT(0 > (cfg.lfd = open_socket(cfg.port)), "open_socket");
+          ERREXIT(0 > (cfg.lfd = sock_init(cfg.port)), "sock_init");
 
           if (0 == getuid()) {
                if (0 > drop_priv(cfg.uid)) {
@@ -133,8 +140,8 @@ drop_priv(uid_t new_uid)
      return 0;
 }
 
-static int
-open_socket(int p)
+int
+sock_init(int port)
 {
      int s;
 #ifdef SYS_LINUX
@@ -156,7 +163,7 @@ open_socket(int p)
      memset(&addr, 0x0, sizeof(addr));
      addr.sin_family = AF_INET;
      addr.sin_addr.s_addr = INADDR_ANY;
-     addr.sin_port = htons(p);
+     addr.sin_port = htons(port);
      AZ(bind(s, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)));
 
      return s;

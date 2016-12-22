@@ -1,6 +1,7 @@
 #ifndef __WSTYPES_H__
 #define __WSTYPES_H__
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include "list.h"
@@ -18,6 +19,7 @@
 #define ERREXIT(exp, text)                      \
      if (exp) { perror(text); exit(1); }
 
+#define ep_connected(ep) (ep->fd != (-1))
 #define buf_read_sz(buf) (buf->wrpos - buf->rdpos)
 #define buf_write_sz(buf) ((unsigned int)sizeof(buf->p) - buf->wrpos)
 #define buf_reset(buf) buf->wrpos = 0; buf->rdpos = 0;
@@ -98,15 +100,17 @@ typedef struct endpoint ep_t;
 
 typedef struct {
      uid_t uid;
-     char *username;
-     char *hostname;
      int lfd;
      int port;
+     char *fwd_port;
+     char *fwd_hostname;
      int verbose;
      int no_fork;
 } wsd_config_t;
 
 void trim(string_t *str);
 string_t *tok(string_t *str, const char del);
+void ep_init(ep_t *ep);
+void ep_destroy(ep_t *ep);
 
 #endif /* #ifndef __WSTYPES_H__ */

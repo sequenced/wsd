@@ -5,9 +5,11 @@
 #include <fcntl.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <netdb.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
 #include "wstypes.h"
 #include "hashtable.h"
 #include "jen.h"
@@ -16,17 +18,11 @@ extern const wsd_config_t *wsd_cfg;
 extern DECLARE_HASHTABLE(ep_hash, 4);
 extern int epfd;
 
-static const char *snd_pathname = "/tmp/pipe-inbound";
-static const char *rcv_pathname = "/tmp/pipe-outbound";
+static ep_t *jen_sock = NULL;
 
-static ep_t *snd_pipe = NULL;
-static ep_t *rcv_pipe = NULL;
-
-static int pipe_write(ep_t *ep);
-static int pipe_read(ep_t *ep);
-static int pipe_close(ep_t *ep);
-static void init_snd_pipe();
-static void init_rcv_pipe();
+static int sock_write(ep_t *ep);
+static int sock_read(ep_t *ep);
+static int sock_close(ep_t *ep);
 
 /*
  * JSON rpc frame layout:
@@ -49,6 +45,10 @@ jen_recv_data_frame(ep_t *ep, wsframe_t *wsf)
                  ep->fd);
      }
 
+     if (!ep_connected(jen_sock)) {
+          return (-1);
+     }
+
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
           char rpl = ep->rcv_buf->p[ep->rcv_buf->rdpos + wsf->payload_len];
           ep->rcv_buf->p[ep->rcv_buf->rdpos + wsf->payload_len] = '\0';
@@ -58,26 +58,23 @@ jen_recv_data_frame(ep_t *ep, wsframe_t *wsf)
 
      /* hash + frame length + '\0' */
      int len = sizeof(long unsigned int) + wsf->payload_len + 1;
-     if (buf_write_sz(snd_pipe->snd_buf) < len)
+     if (buf_write_sz(jen_sock->snd_buf) < len)
           return (-1);
 
-     buf_put(snd_pipe->snd_buf, ep->hash);
+     buf_put(jen_sock->snd_buf, ep->hash);
 
      int k = wsf->payload_len;
-     while (k-- && buf_read_sz(ep->rcv_buf))
-          snd_pipe->snd_buf->p[snd_pipe->snd_buf->wrpos++] =
+     while (k--)
+          jen_sock->snd_buf->p[jen_sock->snd_buf->wrpos++] =
                ep->rcv_buf->p[ep->rcv_buf->rdpos++];
 
-     buf_put(snd_pipe->snd_buf, (char)'\0');
-
-     AZ(buf_read_sz(ep->rcv_buf));
-     buf_reset(ep->rcv_buf);
+     buf_put(jen_sock->snd_buf, (char)'\0');
 
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
      ev.events = EPOLLOUT | EPOLLRDHUP;
-     ev.data.ptr = snd_pipe;
-     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, snd_pipe->fd, &ev));
+     ev.data.ptr = jen_sock;
+     AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, jen_sock->fd, &ev));
 
      hash_add(ep_hash, &ep->hash_node, ep->hash);
 
@@ -87,11 +84,8 @@ jen_recv_data_frame(ep_t *ep, wsframe_t *wsf)
 int
 jen_close()
 {
-     if (snd_pipe && 0 < snd_pipe->fd)
-          AZ(pipe_close(snd_pipe));
-
-     if (rcv_pipe && 0 < rcv_pipe->fd)
-          AZ(pipe_close(rcv_pipe));
+     if (jen_sock && 0 <= jen_sock->fd)
+          AZ(sock_close(jen_sock));
 
      return 0;
 }
@@ -106,64 +100,79 @@ jen_open()
                  __func__);
      }
 
-     if (!snd_pipe) {
-          snd_pipe = malloc(sizeof(ep_t));
-          A(snd_pipe);
-          init_snd_pipe();
-          A(0 > snd_pipe->fd);
+     if (!jen_sock) {
+          jen_sock = malloc(sizeof(ep_t));
+          A(jen_sock);
+          ep_init(jen_sock);
      }
 
-     if (!rcv_pipe) {
-          rcv_pipe = malloc(sizeof(ep_t));
-          A(rcv_pipe);
-          init_rcv_pipe();
-          A(0 > rcv_pipe->fd);
-     }
+     if (!ep_connected(jen_sock)) {
+          ep_init(jen_sock);
+          jen_sock->read = sock_read;
+          jen_sock->write = sock_write;
+          jen_sock->close = sock_close;
 
-     if (-1 == snd_pipe->fd) {
-          int rv = mkfifo(snd_pathname, 0600);
-          ERRET(0 > rv && errno != EEXIST, "mkfifo");
+          ERRET(0 > (jen_sock->fd = socket(AF_INET,
+                                           SOCK_STREAM|SOCK_NONBLOCK,
+                                           0)), "socket");
 
-          snd_pipe->fd = open(snd_pathname, O_WRONLY | O_NONBLOCK);
-          if (0 > snd_pipe->fd) {
-               // see open(2) return values
-               A(errno == ENODEV || errno == ENXIO);
+          struct addrinfo hints, *res;
+          memset(&hints, 0, sizeof(struct addrinfo));
+          hints.ai_family = AF_INET;
+          hints.ai_socktype = SOCK_STREAM;
+          hints.ai_flags = AI_NUMERICSERV;
+
+          int rv = getaddrinfo(wsd_cfg->fwd_hostname,
+                               wsd_cfg->fwd_port,
+                               &hints,
+                               &res);
+          if (0 > rv) {
+               if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+                    printf("\t%s: cannot resolve %s\n",
+                           __func__,
+                           gai_strerror(rv));
+               }
+
+               return (-1);
+          }
+
+          AZ(res->ai_next);
+
+          if (AF_INET != res->ai_family)
+               return (-1);
+
+          rv = connect(jen_sock->fd, res->ai_addr, res->ai_addrlen);
+          freeaddrinfo(res);
+          if (0 > rv && EINPROGRESS != errno) {
+               if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+                    printf("\t%s: connect: %s\n",
+                           __func__,
+                           strerror(errno));
+               }
+
                return (-1);
           }
 
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s: opened %s\n", __func__, snd_pathname);
+               printf("\t%s: fd=%d, connecting to %s:%s\n",
+                      __func__,
+                      jen_sock->fd,
+                      wsd_cfg->fwd_hostname,
+                      wsd_cfg->fwd_port);
           }
 
           struct epoll_event ev;
           memset(&ev, 0, sizeof(ev));
-          ev.data.ptr = snd_pipe;
-          AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, snd_pipe->fd, &ev));
-     }
-
-     if (-1 == rcv_pipe->fd) {
-          int rv = mkfifo(rcv_pathname, 0600);
-          ERRET(0 > rv && errno != EEXIST, "mkfifo");
-
-          rcv_pipe->fd = open(rcv_pathname, O_RDONLY | O_NONBLOCK);
-          A(rcv_pipe->fd >= 0);
-
-          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s: opened %s\n", __func__, rcv_pathname);
-          }
-
-          struct epoll_event ev;
-          memset(&ev, 0, sizeof(ev));
-          ev.events = EPOLLIN;
-          ev.data.ptr = rcv_pipe;
-          AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, rcv_pipe->fd, &ev));
+          ev.data.ptr = jen_sock;
+          ev.events = EPOLLIN | EPOLLRDHUP;
+          AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, jen_sock->fd, &ev));
      }
 
      return 0;
 }
 
 static int
-pipe_write(ep_t *ep)
+sock_write(ep_t *ep)
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           printf("%s:%d: %s: fd=%d\n",
@@ -176,7 +185,9 @@ pipe_write(ep_t *ep)
      A(ep->fd >= 0);
      A(ep->snd_buf->p);
      A(buf_read_sz(ep->snd_buf) > 0);
-     int len = write(ep->fd, ep->snd_buf->p, buf_read_sz(ep->snd_buf));
+     int len = write(ep->fd,
+                     ep->snd_buf->p + ep->snd_buf->rdpos,
+                     buf_read_sz(ep->snd_buf));
      if (0 < len) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {          
                printf("\t%s: wrote %d byte(s)\n",
@@ -190,13 +201,9 @@ pipe_write(ep_t *ep)
 
           struct epoll_event ev;
           memset(&ev, 0, sizeof(ev));
-          ev.events = EPOLLRDHUP;
+          ev.events = EPOLLIN | EPOLLRDHUP;
           ev.data.ptr = ep;
           AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
-
-          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s: removing EPOLLOUT\n", __func__);
-          }
      } else {
           A(0 > len);
      }
@@ -205,7 +212,7 @@ pipe_write(ep_t *ep)
 }
 
 static int
-pipe_close(ep_t *ep)
+sock_close(ep_t *ep)
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           printf("%s:%d: %s: fd=%d\n",
@@ -216,22 +223,15 @@ pipe_close(ep_t *ep)
      }
 
      A(ep->fd >= 0);
-     A(ep->read == NULL ? ep->write != NULL : ep->write == NULL);
-     A(ep->rcv_buf->p == NULL ?
-       ep->snd_buf->p != NULL : ep->rcv_buf->p != NULL);
-
      AZ(close(ep->fd));
-
-     if (snd_pipe == ep)
-          init_snd_pipe();
-     else if (rcv_pipe == ep)
-          init_rcv_pipe();
+     ep_destroy(ep);
+     A(!ep_connected(ep));
 
      return 0;
 }
 
 static int
-pipe_read(ep_t *ep)
+sock_read(ep_t *ep)
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           printf("%s:%d: %s: fd=%d\n",
@@ -241,8 +241,19 @@ pipe_read(ep_t *ep)
                  ep->fd);
      }
 
-     AZ(ep->rcv_buf->wrpos);
-     int len = read(ep->fd, ep->rcv_buf->p, buf_write_sz(ep->rcv_buf));
+     A(0 < buf_write_sz(ep->rcv_buf));
+     int len = read(ep->fd,
+                    ep->rcv_buf->p + ep->rcv_buf->wrpos,
+                    buf_write_sz(ep->rcv_buf));
+     if (0 > len) {
+          if (ECONNREFUSED == errno) {
+               if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+                    printf("\t%s: connection refused\n", __func__);
+               }
+
+               return (-1);
+          }
+     }
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           printf("\t%s: read %d byte(s)\n", __func__, len);
      }
@@ -256,7 +267,7 @@ pipe_read(ep_t *ep)
 
      long unsigned int hash;
      buf_get(ep->rcv_buf, hash);
-     A(hash != 0);
+
      ep_t *sock = NULL;
      hash_for_each_possible(ep_hash, sock, hash_node, hash) {
           if (sock->hash == hash)
@@ -265,7 +276,7 @@ pipe_read(ep_t *ep)
 
      if (NULL == sock) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s: hash=0x%lx: socket closed: dropping %d byte(s)\n",
+               printf("\t%s: no socket for hash: 0x%lx, dropping %d byte(s)\n",
                       __func__,
                       hash,
                       buf_read_sz(ep->rcv_buf));
@@ -276,29 +287,12 @@ pipe_read(ep_t *ep)
           return 0;
      }
 
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+          char rpl = ep->rcv_buf->p[ep->rcv_buf->wrpos];
+          ep->rcv_buf->p[ep->rcv_buf->wrpos] = '\0';
+          printf("%s\n", &ep->rcv_buf->p[ep->rcv_buf->rdpos]);
+          ep->rcv_buf->p[ep->rcv_buf->wrpos] = rpl;
+     }
+
      return sock->proto.send_data_frame(sock, ep);
-}
-
-static void
-init_snd_pipe() {
-     memset(snd_pipe, 0, sizeof(ep_t));
-     snd_pipe->fd = -1;
-     snd_pipe->write = pipe_write;
-     snd_pipe->close = pipe_close;
-     snd_pipe->snd_buf = malloc(sizeof(buf2_t));
-     A(snd_pipe->snd_buf);
-     snd_pipe->rcv_buf = malloc(sizeof(buf2_t));
-     A(snd_pipe->rcv_buf);
-}
-
-static void
-init_rcv_pipe() {
-     memset(rcv_pipe, 0, sizeof(ep_t));
-     rcv_pipe->fd = -1;
-     rcv_pipe->read = pipe_read;
-     rcv_pipe->close = pipe_close;
-     rcv_pipe->snd_buf = malloc(sizeof(buf2_t));
-     A(rcv_pipe->snd_buf);
-     rcv_pipe->rcv_buf = malloc(sizeof(buf2_t));
-     A(rcv_pipe->rcv_buf);
 }

@@ -1,3 +1,4 @@
+#include <string.h>
 #include <stdlib.h>
 #include "wstypes.h"
 
@@ -54,4 +55,28 @@ tok(string_t *str, const char del)
      }
 
      return &rv;
+}
+
+void
+ep_init(ep_t *ep)
+{
+     memset(ep, 0, sizeof(ep_t));
+     ep->fd = -1;
+     ep->snd_buf = malloc(sizeof(buf2_t));
+     A(ep->snd_buf);
+     memset(ep->snd_buf, 0, sizeof(buf2_t));
+     ep->rcv_buf = malloc(sizeof(buf2_t));
+     A(ep->rcv_buf);
+     memset(ep->rcv_buf, 0, sizeof(buf2_t));
+}
+
+void
+ep_destroy(ep_t *ep)
+{
+     A(ep->snd_buf);
+     free(ep->snd_buf);
+     A(ep->rcv_buf);
+     free(ep->rcv_buf);
+     memset(ep, 0, sizeof(ep_t));
+     ep->fd = -1;
 }

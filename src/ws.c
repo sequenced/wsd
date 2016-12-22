@@ -47,7 +47,6 @@
 #define MASK_BIT(byte)              (0x80 & byte)
 #define set_payload_bits(byte, val) (byte |= (0x7f & val))
 #define PAYLOAD_LEN(byte)           (unsigned long)(0x7f & byte)
-#define SET_PAYLOAD_LEN(byte, val)  (byte |= (0x7f & val))
 /* #define PAYLOAD_LEN16(frame)                                            \ */
 /*   ((unsigned long int)be16toh(*(unsigned short*)(frame->byte3))) */
 /* #define PAYLOAD_LEN64(frame)                                    \ */
@@ -76,6 +75,7 @@ static int prepare_close_frame(buf2_t *b, int status);
 static int dispatch(ep_t *ep, wsframe_t *wsf);
 static int set_payload_len(buf2_t *b, const unsigned long payload_len);
 static long calculate_frame_length(const unsigned long len);
+static int process_frame(ep_t *ep);
 
 static int
 is_valid_ver(http_req_t *hr)
@@ -237,11 +237,12 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
                  src->fd);
      }
 
-     unsigned long rdpos = src->rcv_buf->rdpos;
-     AN(rdpos);
-     while (buf_read_sz(src->rcv_buf) && '\0' != src->rcv_buf->p[rdpos++]);
-     A(src->rcv_buf->rdpos < rdpos);
-     unsigned long payload_len = rdpos - src->rcv_buf->rdpos;
+     unsigned long endpos = src->rcv_buf->rdpos;
+     AN(endpos);
+     while (buf_read_sz(src->rcv_buf) && '\0' != src->rcv_buf->p[endpos++]);
+     endpos--; /* Don't consider null terminator for payload length */
+     A(src->rcv_buf->rdpos < endpos);
+     unsigned long payload_len = endpos - src->rcv_buf->rdpos;
      long frame_len = calculate_frame_length(payload_len);
      A(0 < frame_len);
 
@@ -268,11 +269,12 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
      AZ(set_payload_len(dst->snd_buf, payload_len));
 
      unsigned long k = payload_len;
-     while (k--) {
+     while (k--)
           dst->snd_buf->p[dst->snd_buf->wrpos++] =
                src->rcv_buf->p[src->rcv_buf->rdpos++];
-     }
 
+     src->rcv_buf->rdpos++; /* Mark null terminator as read. */
+     
      if (0 == buf_read_sz(src->rcv_buf))
           buf_reset(src->rcv_buf);
 
@@ -300,6 +302,36 @@ ws_recv(ep_t *ep)
                  buf_read_sz(ep->rcv_buf));
      }
 
+     while (1) {
+          int rv = process_frame(ep);
+
+          if (0 == buf_read_sz(ep->rcv_buf)) {
+               buf_reset(ep->rcv_buf);
+          } else {
+               // TODO compact ep->rcv_buf
+          }
+
+          if (1 == rv)
+               break;
+
+          if (0 > rv)
+               break;
+     }
+
+     return 0;
+}
+
+static int
+process_frame(ep_t *ep) {
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: fd=%d, read_sz=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 ep->fd,
+                 buf_read_sz(ep->rcv_buf));
+     }
+
      if (buf_read_sz(ep->rcv_buf) < WS_MASKED_FRAME_LEN) {
           /* need WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2 */
           return 1;
@@ -317,7 +349,7 @@ ws_recv(ep_t *ep)
          || RSV2_BIT(wsf.byte1) != 0
          || RSV3_BIT(wsf.byte1) != 0
          || MASK_BIT(wsf.byte2) == 0) {
-          /* TODO fail connection */
+          return (-1);
      }
 
      if (0 > fill_in_wsframe_details(ep->rcv_buf, &wsf)) {
@@ -336,7 +368,7 @@ ws_recv(ep_t *ep)
 
      /* TODO check that payload64 has left-most bit off */
 
-     if (buf_read_sz(ep->rcv_buf) < wsf.payload_len) {
+     if (wsf.payload_len > buf_read_sz(ep->rcv_buf)) {
           ep->rcv_buf->rdpos = old_rdpos;
           return 1;
      }
@@ -426,15 +458,17 @@ fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf)
           if (buf_read_sz(b) < (2 + 4))
                return -1;
 
-          buf_get(b, wsf->payload_len);
-          wsf->payload_len = be16toh(wsf->payload_len);
+          unsigned short len;
+          buf_get(b, len);
+          wsf->payload_len = be16toh(len);
           buf_get(b, wsf->masking_key);
      } else if (wsf->payload_len == 127) {
           if (buf_read_sz(b) < (2 + 8))
                return -1;
 
-          buf_get(b, wsf->payload_len);
-          wsf->payload_len = be64toh(wsf->payload_len);
+          unsigned long len;
+          buf_get(b, len);
+          wsf->payload_len = be64toh(len);
           buf_get(b, wsf->masking_key);
      }
 
@@ -517,7 +551,7 @@ prepare_close_frame(buf2_t *b, int status)
 
      if (0 < status)
           /* echo back status code; see RFC6455 section 5.5.1 */
-          SET_PAYLOAD_LEN(byte2, 2); /* 2 = status code typed unsigned short */
+          set_payload_bits(byte2, 2); /* 2 = status code typed unsigned short */
 
      buf_put(b, (char)byte1);
      buf_put(b, (char)byte2);

@@ -48,11 +48,6 @@ wschild_main(const wsd_config_t *cfg)
      sac.sa_handler = sigterm;
      AZ(sigaction(SIGTERM, &sac, NULL));
 
-     memset(&sac, 0, sizeof(sac));
-     sac.sa_handler = SIG_IGN;
-     sac.sa_flags = SA_RESTART;
-     AZ(sigaction(SIGPIPE, &sac, NULL));
-
      hash_init(ep_hash);
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           printf("%s:%d: %s: endpoint hashtable has %lu entries\n",
@@ -94,6 +89,14 @@ io_loop() {
           A(nfd >= 0);
           A(nfd <= MAX_EVENTS);
 
+          if (0 < nfd && LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("%s:%d: %s: nfd=%d\n",
+                      __FILE__,
+                      __LINE__,
+                      __func__,
+                      nfd);
+          }
+
           int n;
           for (n = 0; n < nfd; ++n) {
 
@@ -102,16 +105,19 @@ io_loop() {
                     continue;
                }
 
+               ep_t *ep = (ep_t*)evs[n].data.ptr;
+
                if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-                    printf("%s:%d: %s: nfd=%d, events=0x%x\n",
-                           __FILE__,
-                           __LINE__,
+                    printf("\t%s: fd=%d, events=0x%x\n",
                            __func__,
-                           nfd,
+                           ep->fd,
                            evs[n].events);
                }
 
-               ep_t *ep = (ep_t*)evs[n].data.ptr;
+               A(ep->read);
+               A(ep->write);
+               A(ep->close);
+
                if (evs[n].events & EPOLLIN ||
                    evs[n].events & EPOLLPRI) {
                     int rv = ep->read(ep);
@@ -147,10 +153,6 @@ io_loop() {
      int bkt, num = 0;
      ep_t *ep;
      hash_for_each(ep_hash, bkt, ep, hash_node) {
-          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s: closing fd=%d\n", __func__, ep->fd);
-          }
-
           AN(ep->close);
           AZ(ep->close(ep));
 
@@ -184,21 +186,14 @@ sock_accept(int lfd)
      ev.events = EPOLLIN | EPOLLRDHUP;
      ev.data.ptr = malloc(sizeof(ep_t));
      A(ev.data.ptr);
-
-     memset(ev.data.ptr, 0, sizeof(ep_t));
      ep_t *ep = (ep_t*)ev.data.ptr;
+     ep_init(ep);
      ep->fd = fd;
      ep->read = sock_read;
      ep->write = sock_write;
      ep->close = sock_close;
      ep->proto.recv = http_recv;
      ep->proto.handshake = ws_handshake;
-     ep->snd_buf = malloc(sizeof(buf2_t));
-     A(ep->snd_buf);
-     memset(ep->snd_buf, 0, sizeof(buf2_t));
-     ep->rcv_buf = malloc(sizeof(buf2_t));
-     A(ep->rcv_buf);
-     memset(ep->rcv_buf, 0, sizeof(buf2_t));
 
      struct timespec ts;
      memset((void*)&ts, 0, sizeof(ts));
@@ -282,20 +277,8 @@ sock_write(ep_t *ep)
                ev.data.ptr = ep;
                AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
 
-               if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-                    printf("\t%s: removing EPOLLOUT: fd=%d\n",
-                           __func__,
-                           ep->fd);
-               }
-
-               if (ep->close_on_write) {
-                    if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-                         printf("\t%s: close-on-write: fd=%d\n",
-                                __func__,
-                                ep->fd);
-                    }
+               if (ep->close_on_write)
                     sock_close(ep);
-               }
           }
      } else {
           A(0 > len);
