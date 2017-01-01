@@ -23,14 +23,16 @@ int
 main(int argc, char **argv)
 {
      int opt;
+     int pidfd;
      int port_arg = 6084;                 /* default */
      int no_fork_arg = 0;
      int verbose_arg = 0;
      const char *fwd_port_arg = "6085";   /* default */
      const char *fwd_hostname_arg = NULL;
      const char *user_arg = NULL;
+     const char *pidfile_arg = NULL;
 
-     while ((opt = getopt(argc, argv, "h:p:f:u:dv")) != -1) {
+     while ((opt = getopt(argc, argv, "h:p:o:f:u:dv")) != -1) {
           switch (opt) {
           case 'h':
                fwd_hostname_arg = optarg;
@@ -39,6 +41,9 @@ main(int argc, char **argv)
                user_arg = optarg;
                break;
           case 'p':
+               pidfile_arg = optarg;
+               break;
+          case 'o':
                port_arg = atoi(optarg);
                break;
           case 'f':
@@ -73,6 +78,16 @@ main(int argc, char **argv)
           exit(1);
      }
 
+     if (pidfile_arg) {
+          pidfd = open(pidfile_arg,
+                       O_CREAT|O_EXCL|O_WRONLY,
+                       S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+          if (0 > pidfd) {
+               fprintf(stderr, "%s: cannot open: %s\n", argv[0], pidfile_arg);
+               exit(1);
+          }
+     }
+
      wsd_config_t cfg;
      memset(&cfg, 0x0, sizeof(wsd_config_t));
      cfg.uid = pwent->pw_uid;
@@ -85,6 +100,7 @@ main(int argc, char **argv)
      strcpy(cfg.fwd_hostname, fwd_hostname_arg);
      cfg.verbose = verbose_arg;
      cfg.no_fork = no_fork_arg;
+     cfg.pidfilename = pidfile_arg;
 
      pid_t pid = 0;
      if (!cfg.no_fork) {
@@ -103,6 +119,25 @@ main(int argc, char **argv)
 
           ERREXIT(0 > chdir("/"), "chdir");
 
+          if (cfg.pidfilename) {
+               char pidstr[16];
+               if (0 > snprintf(pidstr, sizeof(pidstr),
+                                "%ju",
+                                (uintmax_t)getpid())) {
+                    unlink(cfg.pidfilename);
+                    perror("snprintf");
+                    exit(1);
+               }
+
+               if (0 > write(pidfd, pidstr, strlen(pidstr))) {
+                    unlink(cfg.pidfilename);
+                    perror("write");
+                    exit(1);
+               }
+
+               AZ(close(pidfd));
+          }
+          
           if (!cfg.no_fork) {
                close(STDIN_FILENO);
                close(STDOUT_FILENO);
@@ -122,6 +157,9 @@ main(int argc, char **argv)
 
           syslog(LOG_INFO, "stopped");
           closelog();
+
+          if (cfg.pidfilename)
+               AZ(unlink(cfg.pidfilename));
 
           exit(rv);
      }

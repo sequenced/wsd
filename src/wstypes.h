@@ -104,6 +104,7 @@ typedef struct {
      int port;
      char *fwd_port;
      char *fwd_hostname;
+     const char *pidfilename;
      int verbose;
      int no_fork;
 } wsd_config_t;
