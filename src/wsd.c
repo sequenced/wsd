@@ -86,6 +86,8 @@ main(int argc, char **argv)
                fprintf(stderr, "%s: cannot open: %s\n", argv[0], pidfile_arg);
                exit(1);
           }
+
+          AZ(fchown(pidfd, pwent->pw_uid, pwent->pw_gid));
      }
 
      wsd_config_t cfg;
