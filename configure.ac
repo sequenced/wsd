@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.67])
-AC_INIT([wsd], [0.12], [bugs@sequencedsystems.com])
+AC_INIT([wsd], [0.13], [bugs@sequencedsystems.com])
 AC_CONFIG_SRCDIR([src/wsd.c])
 AM_INIT_AUTOMAKE([-Wall -Werror])
 AM_PROG_CC_C_O
@@ -33,7 +33,7 @@ AC_PROG_LN_S
 AC_CHECK_LIB(crypto, BIO_f_base64,, AC_MSG_FAILURE(cannot find libcrypto))
 
 # Checks for header files.
-AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netinet/in.h stddef.h stdlib.h string.h sys/socket.h sys/time.h syslog.h unistd.h endian.h openssl/sha.h dlfcn.h])
+AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netinet/in.h stddef.h stdlib.h string.h sys/socket.h sys/time.h syslog.h unistd.h endian.h openssl/sha.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_INLINE
