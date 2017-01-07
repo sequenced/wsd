@@ -8,39 +8,28 @@ wsd \- high performance websocket proxy
 .SH DESCRIPTION
 The
 .B wsd
-websocket proxy is a high performance daemon that implements a practical subset of the websocket protocol as defined by RFC 6455.
+websocket proxy is a high performance daemon that implements a practical subset of the websocket protocol as defined by RFC 6455. It uses epoll(7) to multiplex concurrent network connections, minimises memory copies and avoids allocating memory at runtime whenever possible. 
 .SH OPTIONS
 .TP
-.BI \-h " hostname"
-Proxy websocket connections to
-.I hostname
-(default: 127.0.0.1)
+.BI \-h " host"
+Proxies websocket connections to host. Default is 127.0.0.1.
 .TP
 .BI \-f " port"
-Proxy websocket connections to
-.I port
-(default: 6085)
+Proxies websocket connections to port. Default is 6085.
 .TP
 .BI \-o " port"
-Listen on
-.I port
-for incoming connections (default: 6084)
+Listens on port for incoming connections. Default is 6084.
 .TP
 .BI \-p " file"
-Store process id in
-.I file
+Stores process id in file.
 .TP
 .BI \-u " user"
-Run daemon as
-.I user
-(default: wsd),
-.I user
-cannot be root
+Runs daemon as user. Default is \fBwsd\fR; user cannot be root.
 .TP
-.BI \-d " "
-
-Do not fork and run in background
+.B \-d
+Does not fork and stays attached to terminal.
 .TP
-.BI \-v " "
-
-Log to stdout, use option multiple times for more detail
+.B \-v
+Logs to stdout, use option multiple times for more detail.
+.SH BUGS
+Please report to bugs@sequencedsystems.com.
