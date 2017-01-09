@@ -315,6 +315,7 @@ static int sock_close(ep_t *ep)
           hash_del(&ep->hash_node);
      }
 
+     ep_destroy(ep);
      free(ep);
 
      return 0;
