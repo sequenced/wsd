@@ -1,29 +1,36 @@
 #include <string.h>
 #include <assert.h>
-#include "wstypes.h"
+#include <wstypes.h>
+#include <hashtable.h>
+
+DEFINE_HASHTABLE(test_hash, 6);
+
+struct some_struct {
+     short small_value;
+     long unsigned int large_value;
+     struct hlist_node hash_node;
+};
 
 int
 main(int argc, char **argv)
 {
-  hash32_table_t t;
-  memset((void*)&t, 0x0, sizeof(hash32_table_t));
-  t.hash=hash32_table_hash;
+     hash_init(test_hash);
 
-  char *test_data[] = {"", "one", "two", "three", "four", "five", "six"};
-  assert(0==hash32_table_insert(&t, 1, test_data[0]));
-  assert(0==strcmp(test_data[0], (char*)hash32_table_lookup(&t, 1)));
+     for (int i = 0; i < 8; i++) {
+          struct some_struct *s = malloc(sizeof(struct some_struct));
+          AN(s);
+          memset(s, 0, sizeof(struct some_struct));
+          s->small_value = 1 ^ i;
+          s->large_value = i << 8;
+          hash_add(test_hash, &s->hash_node, i);
+     }
 
-  /* insert new value for existing key */
-  assert(0==hash32_table_insert(&t, 1, test_data[1]));
-  assert(0==strcmp(test_data[1], (char*)hash32_table_lookup(&t, 1)));
+     struct some_struct *p;
+     hash_for_each_possible(test_hash, p, hash_node, 8) {
+          A(p->small_value == 1 ^ 8);
+          A(p->large_value == 8 << 8);
+     }
+     AN(p);
 
-  /* store a bunch of values and lookup them */
-  int i;
-  for (i=1; i<7; i++)
-    assert(0==hash32_table_insert(&t, i, test_data[i]));
-
-  for (i=1; i<7; i++)
-    assert(0==strcmp(test_data[i], (char*)hash32_table_lookup(&t, i)));
-
-  return 0;
+     return 0;
 }

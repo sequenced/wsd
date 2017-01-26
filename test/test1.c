@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include "ws.h"
+#include <ws.h>
 
 wsd_config_t *wsd_cfg;
 
