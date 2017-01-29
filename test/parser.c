@@ -35,7 +35,7 @@ parse_samples() {
 
           http_req_t *req = malloc(sizeof(http_req_t));
           bzero(req, sizeof(http_req_t));
-          assert(0 < parse_request_line(t, req));
+          assert(0 == parse_request_line(t, req));
           assert(0 < req->method.len);
           assert(0 < req->req_target.len);
           assert(8 == req->http_ver.len);

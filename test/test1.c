@@ -16,7 +16,7 @@ main(int argc, char **argv)
 {
      /* setup configuration */
      wsd_cfg = malloc(sizeof(wsd_config_t));
-     AZ(wsd_cfg);
+     A(wsd_cfg);
      memset(wsd_cfg, 0, sizeof(wsd_config_t));
 
      /* setup endpoint */

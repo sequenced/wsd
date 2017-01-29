@@ -6,6 +6,7 @@
 DEFINE_HASHTABLE(test_hash, 6);
 
 struct some_struct {
+     long unsigned int hash;
      short small_value;
      long unsigned int large_value;
      struct hlist_node hash_node;
@@ -22,15 +23,20 @@ main(int argc, char **argv)
           memset(s, 0, sizeof(struct some_struct));
           s->small_value = 1 ^ i;
           s->large_value = i << 8;
-          hash_add(test_hash, &s->hash_node, i);
+          s->hash = i;
+          hash_add(test_hash, &s->hash_node, s->hash);
      }
 
-     struct some_struct *p;
-     hash_for_each_possible(test_hash, p, hash_node, 8) {
-          A(p->small_value == 1 ^ 8);
-          A(p->large_value == 8 << 8);
+     long unsigned int hash = 7;
+     struct some_struct *p = 0;
+     hash_for_each_possible(test_hash, p, hash_node, hash) {
+          if (p->hash == hash)
+               break;
      }
+     
      AN(p);
+     A(p->small_value == 1 ^ 7);
+     A(p->large_value == 7 << 8);
 
      return 0;
 }

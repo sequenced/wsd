@@ -25,7 +25,7 @@ char *samples[] = {
      "chrome-51-sample"
 };
 
-int noop(ep_t *conn, http_req_t *req) { return 1; }
+int noop(ep_t *conn, http_req_t *req) { return 0; }
 
 int
 main() {
@@ -34,19 +34,19 @@ main() {
 
           assert(0 < (fd = open(samples[i], O_RDONLY)));
 
-          int len;
-          buf2_t *in = malloc(sizeof(buf2_t));
-          assert(0 < (len = read(fd, in->p, buf_write_sz(in))));
-          in->wrpos += len;
-          
-          wsd_cfg=malloc(sizeof(wsd_config_t));
-          bzero(wsd_cfg, sizeof(wsd_config_t));
-
           ep_t *ep = malloc(sizeof(ep_t));
           ep_init(ep);
           ep->proto.handshake = noop;
 
-          assert(0 < http_recv(ep));
+          int len;
+          assert(0 < (len = read(fd, ep->rcv_buf, buf_write_sz(ep->rcv_buf))));
+          ep->rcv_buf->wrpos += len;
+          
+          wsd_cfg=malloc(sizeof(wsd_config_t));
+          bzero(wsd_cfg, sizeof(wsd_config_t));
+
+
+          assert(0 == http_recv(ep));
 
           ep_destroy(ep);
           
