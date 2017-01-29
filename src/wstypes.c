@@ -62,21 +62,21 @@ ep_init(ep_t *ep)
 {
      memset(ep, 0, sizeof(ep_t));
      ep->fd = -1;
-     ep->snd_buf = malloc(sizeof(buf2_t));
-     A(ep->snd_buf);
-     memset(ep->snd_buf, 0, sizeof(buf2_t));
-     ep->rcv_buf = malloc(sizeof(buf2_t));
-     A(ep->rcv_buf);
-     memset(ep->rcv_buf, 0, sizeof(buf2_t));
+     ep->send_buf = malloc(sizeof(buf2_t));
+     A(ep->send_buf);
+     memset(ep->send_buf, 0, sizeof(buf2_t));
+     ep->recv_buf = malloc(sizeof(buf2_t));
+     A(ep->recv_buf);
+     memset(ep->recv_buf, 0, sizeof(buf2_t));
 }
 
 void
 ep_destroy(ep_t *ep)
 {
-     A(ep->snd_buf);
-     free(ep->snd_buf);
-     A(ep->rcv_buf);
-     free(ep->rcv_buf);
+     A(ep->send_buf);
+     free(ep->send_buf);
+     A(ep->recv_buf);
+     free(ep->recv_buf);
      memset(ep, 0, sizeof(ep_t));
      ep->fd = -1;
 }

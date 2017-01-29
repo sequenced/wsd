@@ -85,8 +85,8 @@ typedef struct {
 
 struct endpoint {
      long unsigned int hash;
-     buf2_t *snd_buf;
-     buf2_t *rcv_buf;
+     buf2_t *send_buf;
+     buf2_t *recv_buf;
      int fd;
      int (*read)(struct endpoint *ep);
      int (*write)(struct endpoint *ep);

@@ -39,7 +39,7 @@ main(int argc, char **argv)
      /* test this function */
      int rv = ws_handshake(&ep, &hr);
      AZ(rv);
-     A(0 < buf_write_sz(ep.snd_buf));
+     A(0 < buf_write_sz(ep.send_buf));
      
 //     assert(NULL!=strstr(buf_ref(wsc.buf_out), EXPECTED_ACCEPT_VAL));
 //     assert(wsc.pfd->events&POLLOUT);

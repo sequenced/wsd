@@ -126,7 +126,7 @@ io_loop() {
                     } else {
                          A(0 <= rv);
 
-                         if (0 == buf_read_sz(ep->snd_buf))
+                         if (0 == buf_read_sz(ep->send_buf))
                               continue;
 
                          struct epoll_event ev;
@@ -217,15 +217,15 @@ static int
 sock_read(ep_t *ep)
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {     
-          printf("%s:%d: %s: ep->fd=%d\n",
+          printf("%s:%d: %s: fd=%d\n",
                  __FILE__,
                  __LINE__,
                  __func__,
                  ep->fd);
      }
 
-     AN(buf_write_sz(ep->rcv_buf));
-     int len = read(ep->fd, ep->rcv_buf->p, buf_write_sz(ep->rcv_buf));
+     AN(buf_write_sz(ep->recv_buf));
+     int len = read(ep->fd, ep->recv_buf->p, buf_write_sz(ep->recv_buf));
      ERRET(0 > len, "read");
 
      /* EOF */
@@ -236,7 +236,7 @@ sock_read(ep_t *ep)
           printf("\t%s: read %d byte(s)\n", __func__, len);
      }
 
-     ep->rcv_buf->wrpos += len;
+     ep->recv_buf->wrpos += len;
      AN(ep->proto.recv);
      return ep->proto.recv(ep);
 }
@@ -250,27 +250,27 @@ sock_write(ep_t *ep)
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_read_sz(ep->snd_buf));
+                 buf_read_sz(ep->send_buf));
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          ep->snd_buf->p[ep->snd_buf->wrpos] = '\0';
-          printf("%s\n", &ep->snd_buf->p[ep->snd_buf->rdpos]);
+          ep->send_buf->p[ep->send_buf->wrpos] = '\0';
+          printf("%s\n", &ep->send_buf->p[ep->send_buf->rdpos]);
      }
 
      A(ep->fd >= 0);
-     A(buf_read_sz(ep->snd_buf) > 0);
-     int len = write(ep->fd, ep->snd_buf->p, buf_read_sz(ep->snd_buf));
+     A(buf_read_sz(ep->send_buf) > 0);
+     int len = write(ep->fd, ep->send_buf->p, buf_read_sz(ep->send_buf));
      if (0 < len) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
                printf("\t%s: wrote %d byte(s)\n", __func__, len);
           }
 
-          ep->snd_buf->rdpos += len;
-          AZ(buf_read_sz(ep->snd_buf));
-          buf_reset(ep->snd_buf);
+          ep->send_buf->rdpos += len;
+          AZ(buf_read_sz(ep->send_buf));
+          buf_reset(ep->send_buf);
 
-          if (0 == ep->snd_buf->rdpos) {
+          if (0 == ep->send_buf->rdpos) {
                struct epoll_event ev;
                memset(&ev, 0, sizeof(ev));
                ev.events = EPOLLIN | EPOLLRDHUP;
@@ -295,8 +295,8 @@ static int sock_close(ep_t *ep)
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_write_sz(ep->snd_buf),
-                 buf_write_sz(ep->rcv_buf));
+                 buf_write_sz(ep->send_buf),
+                 buf_write_sz(ep->recv_buf));
      }
 
      A(ep->hash != 0L);

@@ -50,25 +50,25 @@ jen_recv_data_frame(ep_t *ep, wsframe_t *wsf)
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          char rpl = ep->rcv_buf->p[ep->rcv_buf->rdpos + wsf->payload_len];
-          ep->rcv_buf->p[ep->rcv_buf->rdpos + wsf->payload_len] = '\0';
-          printf("%s\n", &ep->rcv_buf->p[ep->rcv_buf->rdpos]);
-          ep->rcv_buf->p[ep->rcv_buf->rdpos + wsf->payload_len] = rpl;
+          char rpl = ep->recv_buf->p[ep->recv_buf->rdpos + wsf->payload_len];
+          ep->recv_buf->p[ep->recv_buf->rdpos + wsf->payload_len] = '\0';
+          printf("%s\n", &ep->recv_buf->p[ep->recv_buf->rdpos]);
+          ep->recv_buf->p[ep->recv_buf->rdpos + wsf->payload_len] = rpl;
      }
 
      /* hash + frame length + '\0' */
      int len = sizeof(long unsigned int) + wsf->payload_len + 1;
-     if (buf_write_sz(jen_sock->snd_buf) < len)
+     if (buf_write_sz(jen_sock->send_buf) < len)
           return (-1);
 
-     buf_put(jen_sock->snd_buf, ep->hash);
+     buf_put(jen_sock->send_buf, ep->hash);
 
      int k = wsf->payload_len;
      while (k--)
-          jen_sock->snd_buf->p[jen_sock->snd_buf->wrpos++] =
-               ep->rcv_buf->p[ep->rcv_buf->rdpos++];
+          jen_sock->send_buf->p[jen_sock->send_buf->wrpos++] =
+               ep->recv_buf->p[ep->recv_buf->rdpos++];
 
-     buf_put(jen_sock->snd_buf, (char)'\0');
+     buf_put(jen_sock->send_buf, (char)'\0');
 
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
@@ -183,11 +183,11 @@ sock_write(ep_t *ep)
      }
 
      A(ep->fd >= 0);
-     A(ep->snd_buf->p);
-     A(buf_read_sz(ep->snd_buf) > 0);
+     A(ep->send_buf->p);
+     A(buf_read_sz(ep->send_buf) > 0);
      int len = write(ep->fd,
-                     ep->snd_buf->p + ep->snd_buf->rdpos,
-                     buf_read_sz(ep->snd_buf));
+                     ep->send_buf->p + ep->send_buf->rdpos,
+                     buf_read_sz(ep->send_buf));
      if (0 < len) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {          
                printf("\t%s: wrote %d byte(s)\n",
@@ -195,9 +195,9 @@ sock_write(ep_t *ep)
                       len);
           }
 
-          ep->snd_buf->rdpos += len;
-          AZ(buf_read_sz(ep->snd_buf));
-          buf_reset(ep->snd_buf);
+          ep->send_buf->rdpos += len;
+          AZ(buf_read_sz(ep->send_buf));
+          buf_reset(ep->send_buf);
 
           struct epoll_event ev;
           memset(&ev, 0, sizeof(ev));
@@ -241,10 +241,10 @@ sock_read(ep_t *ep)
                  ep->fd);
      }
 
-     A(0 < buf_write_sz(ep->rcv_buf));
+     A(0 < buf_write_sz(ep->recv_buf));
      int len = read(ep->fd,
-                    ep->rcv_buf->p + ep->rcv_buf->wrpos,
-                    buf_write_sz(ep->rcv_buf));
+                    ep->recv_buf->p + ep->recv_buf->wrpos,
+                    buf_write_sz(ep->recv_buf));
      if (0 > len) {
           if (ECONNREFUSED == errno) {
                if (LOG_VVERBOSE <= wsd_cfg->verbose) {
@@ -263,10 +263,10 @@ sock_read(ep_t *ep)
      if (0 == len)
           return (-1);
 
-     ep->rcv_buf->wrpos += len;
+     ep->recv_buf->wrpos += len;
 
      long unsigned int hash;
-     buf_get(ep->rcv_buf, hash);
+     buf_get(ep->recv_buf, hash);
 
      ep_t *sock = NULL;
      hash_for_each_possible(ep_hash, sock, hash_node, hash) {
@@ -279,19 +279,19 @@ sock_read(ep_t *ep)
                printf("\t%s: no socket for hash: 0x%lx, dropping %d byte(s)\n",
                       __func__,
                       hash,
-                      buf_read_sz(ep->rcv_buf));
+                      buf_read_sz(ep->recv_buf));
           }
           /* Socket closed; drop data on the floor */
-          buf_reset(ep->rcv_buf);
+          buf_reset(ep->recv_buf);
 
           return 0;
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          char rpl = ep->rcv_buf->p[ep->rcv_buf->wrpos];
-          ep->rcv_buf->p[ep->rcv_buf->wrpos] = '\0';
-          printf("%s\n", &ep->rcv_buf->p[ep->rcv_buf->rdpos]);
-          ep->rcv_buf->p[ep->rcv_buf->wrpos] = rpl;
+          char rpl = ep->recv_buf->p[ep->recv_buf->wrpos];
+          ep->recv_buf->p[ep->recv_buf->wrpos] = '\0';
+          printf("%s\n", &ep->recv_buf->p[ep->recv_buf->rdpos]);
+          ep->recv_buf->p[ep->recv_buf->wrpos] = rpl;
      }
 
      return sock->proto.send_data_frame(sock, ep);

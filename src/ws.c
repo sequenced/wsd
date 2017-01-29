@@ -195,9 +195,9 @@ ws_handshake(ep_t *ep, http_req_t *hr)
                  ep->fd);
      }
 
-     AN(buf_write_sz(ep->snd_buf));
-     if (0 > prepare_handshake(ep->snd_buf, hr)) {
-          if (0 > http_prepare_response(ep->snd_buf, HTTP_500))
+     AN(buf_write_sz(ep->send_buf));
+     if (0 > prepare_handshake(ep->send_buf, hr)) {
+          if (0 > http_prepare_response(ep->send_buf, HTTP_500))
                return (-1);
      }
 
@@ -214,13 +214,13 @@ ws_handshake(ep_t *ep, http_req_t *hr)
      goto ok;
 
 bad:
-     if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
+     if (0 > http_prepare_response(ep->send_buf, HTTP_400))
           return (-1);
 
      ep->close_on_write = 1;
 
 ok:
-     buf_reset(ep->rcv_buf);
+     buf_reset(ep->recv_buf);
 
      return 0;
 }
@@ -237,12 +237,12 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
                  src->fd);
      }
 
-     unsigned long endpos = src->rcv_buf->rdpos;
+     unsigned long endpos = src->recv_buf->rdpos;
      AN(endpos);
-     while (buf_read_sz(src->rcv_buf) && '\0' != src->rcv_buf->p[endpos++]);
+     while (buf_read_sz(src->recv_buf) && '\0' != src->recv_buf->p[endpos++]);
      endpos--; /* Don't consider null terminator for payload length */
-     A(src->rcv_buf->rdpos < endpos);
-     unsigned long payload_len = endpos - src->rcv_buf->rdpos;
+     A(src->recv_buf->rdpos < endpos);
+     unsigned long payload_len = endpos - src->recv_buf->rdpos;
      long frame_len = calculate_frame_length(payload_len);
      A(0 < frame_len);
 
@@ -253,11 +253,11 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
                  payload_len);
      }
 
-     if (buf_write_sz(dst->snd_buf) < frame_len) {
+     if (buf_write_sz(dst->send_buf) < frame_len) {
           /* Destination buffer too small, drop data */
-          src->rcv_buf->rdpos += payload_len;
-          if (0 == buf_read_sz(src->rcv_buf))
-               buf_reset(src->rcv_buf);
+          src->recv_buf->rdpos += payload_len;
+          if (0 == buf_read_sz(src->recv_buf))
+               buf_reset(src->recv_buf);
 
           return 0;
      }
@@ -265,18 +265,18 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
      char byte1 = 0;
      set_fin_bit(byte1);
      set_opcode(byte1, WS_TEXT_FRAME);
-     buf_put(dst->snd_buf, byte1);
-     AZ(set_payload_len(dst->snd_buf, payload_len));
+     buf_put(dst->send_buf, byte1);
+     AZ(set_payload_len(dst->send_buf, payload_len));
 
      unsigned long k = payload_len;
      while (k--)
-          dst->snd_buf->p[dst->snd_buf->wrpos++] =
-               src->rcv_buf->p[src->rcv_buf->rdpos++];
+          dst->send_buf->p[dst->send_buf->wrpos++] =
+               src->recv_buf->p[src->recv_buf->rdpos++];
 
-     src->rcv_buf->rdpos++; /* Mark null terminator as read. */
+     src->recv_buf->rdpos++; /* Mark null terminator as read. */
      
-     if (0 == buf_read_sz(src->rcv_buf))
-          buf_reset(src->rcv_buf);
+     if (0 == buf_read_sz(src->recv_buf))
+          buf_reset(src->recv_buf);
 
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
@@ -291,7 +291,7 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
 int
 ws_recv(ep_t *ep)
 {
-     AN(buf_read_sz(ep->rcv_buf));
+     AN(buf_read_sz(ep->recv_buf));
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           printf("%s:%d: %s: fd=%d, read_sz=%d\n",
@@ -299,16 +299,16 @@ ws_recv(ep_t *ep)
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_read_sz(ep->rcv_buf));
+                 buf_read_sz(ep->recv_buf));
      }
 
      while (1) {
           int rv = process_frame(ep);
 
-          if (0 == buf_read_sz(ep->rcv_buf)) {
-               buf_reset(ep->rcv_buf);
+          if (0 == buf_read_sz(ep->recv_buf)) {
+               buf_reset(ep->recv_buf);
           } else {
-               // TODO compact ep->rcv_buf
+               // TODO compact ep->recv_buf
           }
 
           if (1 == rv)
@@ -329,20 +329,20 @@ process_frame(ep_t *ep) {
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_read_sz(ep->rcv_buf));
+                 buf_read_sz(ep->recv_buf));
      }
 
-     if (buf_read_sz(ep->rcv_buf) < WS_MASKED_FRAME_LEN) {
+     if (buf_read_sz(ep->recv_buf) < WS_MASKED_FRAME_LEN) {
           /* need WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2 */
           return 1;
      }
 
-     int old_rdpos = ep->rcv_buf->rdpos;
+     int old_rdpos = ep->recv_buf->rdpos;
 
      wsframe_t wsf;
      memset(&wsf, 0x0, sizeof(wsframe_t));
-     buf_get(ep->rcv_buf, wsf.byte1);
-     buf_get(ep->rcv_buf, wsf.byte2);
+     buf_get(ep->recv_buf, wsf.byte1);
+     buf_get(ep->recv_buf, wsf.byte2);
 
      /* see RFC6455 section 5.2 */
      if (RSV1_BIT(wsf.byte1) != 0
@@ -352,8 +352,8 @@ process_frame(ep_t *ep) {
           return (-1);
      }
 
-     if (0 > fill_in_wsframe_details(ep->rcv_buf, &wsf)) {
-          ep->rcv_buf->rdpos = old_rdpos;
+     if (0 > fill_in_wsframe_details(ep->recv_buf, &wsf)) {
+          ep->recv_buf->rdpos = old_rdpos;
           return 1;
      }
 
@@ -368,12 +368,12 @@ process_frame(ep_t *ep) {
 
      /* TODO check that payload64 has left-most bit off */
 
-     if (wsf.payload_len > buf_read_sz(ep->rcv_buf)) {
-          ep->rcv_buf->rdpos = old_rdpos;
+     if (wsf.payload_len > buf_read_sz(ep->recv_buf)) {
+          ep->recv_buf->rdpos = old_rdpos;
           return 1;
      }
 
-     decode(ep->rcv_buf, &wsf);
+     decode(ep->recv_buf, &wsf);
      return dispatch(ep, &wsf);
 }
 
@@ -480,8 +480,8 @@ close_frame(ep_t *ep, wsframe_t *wsf)
 {
      int rv = 0;
      unsigned short status = 0;
-     if (WS_FRAME_STATUS_LEN <= buf_write_sz(ep->snd_buf)) {
-          buf_get(ep->rcv_buf, status);
+     if (WS_FRAME_STATUS_LEN <= buf_write_sz(ep->send_buf)) {
+          buf_get(ep->recv_buf, status);
           status = be16toh(status);
      }
 
@@ -495,7 +495,7 @@ close_frame(ep_t *ep, wsframe_t *wsf)
      }
 
      if (!ep->closing) {
-          if (0 > prepare_close_frame(ep->snd_buf, status))
+          if (0 > prepare_close_frame(ep->send_buf, status))
                return -1;
 
           ep->close_on_write = 1;
@@ -506,7 +506,7 @@ close_frame(ep_t *ep, wsframe_t *wsf)
      }
 
      /* don't process data after close frame, see RFC6455 section 5.5.1 */
-     buf_reset(ep->rcv_buf);
+     buf_reset(ep->recv_buf);
 
      return rv;
 }
@@ -569,7 +569,7 @@ start_closing_handshake(ep_t *ep, wsframe_t *wsf, int status)
      if (ep->closing)
           return 0;
 
-     if (0 > prepare_close_frame(ep->snd_buf, status))
+     if (0 > prepare_close_frame(ep->send_buf, status))
           return -1;
 
      ep->closing = 1;

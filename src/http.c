@@ -22,7 +22,7 @@ static int tokenise_connection(string_t *s);
 int
 http_recv(ep_t *ep)
 {
-     AN(buf_read_sz(ep->rcv_buf));
+     AN(buf_read_sz(ep->recv_buf));
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           printf("%s:%d: %s: fd=%d, read_sz=%d\n",
@@ -30,12 +30,12 @@ http_recv(ep_t *ep)
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_read_sz(ep->rcv_buf));
+                 buf_read_sz(ep->recv_buf));
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          ep->rcv_buf->p[ep->rcv_buf->wrpos] = '\0';
-          printf("%s\n", &ep->rcv_buf->p[ep->rcv_buf->rdpos]);
+          ep->recv_buf->p[ep->recv_buf->wrpos] = '\0';
+          printf("%s\n", &ep->recv_buf->p[ep->recv_buf->rdpos]);
      }
 
      int rv;
@@ -43,7 +43,7 @@ http_recv(ep_t *ep)
      memset(&t, 0x0, sizeof(string_t));
 
      /* Tokenise start line ... */
-     if (0 > (rv = http_header_tok(&ep->rcv_buf->p[ep->rcv_buf->rdpos], &t))) {
+     if (0 > (rv = http_header_tok(&ep->recv_buf->p[ep->recv_buf->rdpos], &t))) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
                printf("\t%s: errno=%d\n", __func__, errno);
           }
@@ -65,7 +65,7 @@ http_recv(ep_t *ep)
                printf("\t%s: errno=%d\n", __func__, errno);
           }
 
-          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
+          if (0 > http_prepare_response(ep->send_buf, HTTP_400))
                return (-1);
 
           goto error;
@@ -73,7 +73,7 @@ http_recv(ep_t *ep)
 
      /* ... validate request line ... */
      if (!is_valid_req_line(&hr)) {
-          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
+          if (0 > http_prepare_response(ep->send_buf, HTTP_400))
                return (-1);
 
           goto error;
@@ -86,7 +86,7 @@ http_recv(ep_t *ep)
                     printf("\t%s: errno=%d\n", __func__, errno);
                }
 
-               if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
+               if (0 > http_prepare_response(ep->send_buf, HTTP_400))
                     return (-1);
 
                goto error;
@@ -102,7 +102,7 @@ http_recv(ep_t *ep)
           /* Implementing as MUST; see RFC7230, section 5.4 and
            * RFC6455, section 4.1
            */
-          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
+          if (0 > http_prepare_response(ep->send_buf, HTTP_400))
                return (-1);
 
           goto error;
@@ -113,7 +113,7 @@ http_recv(ep_t *ep)
                printf("\t%s: invalid upgrade header field\n", __func__);
           }
 
-          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
+          if (0 > http_prepare_response(ep->send_buf, HTTP_400))
                return (-1);
 
           goto error;
@@ -124,7 +124,7 @@ http_recv(ep_t *ep)
                printf("\t%s: invalid connection header field\n", __func__);
           }
 
-          if (0 > http_prepare_response(ep->snd_buf, HTTP_400))
+          if (0 > http_prepare_response(ep->send_buf, HTTP_400))
                return (-1);
 
           goto error;
@@ -133,7 +133,7 @@ http_recv(ep_t *ep)
      return ep->proto.handshake(ep, &hr);
 
 error:
-     buf_reset(ep->rcv_buf);
+     buf_reset(ep->recv_buf);
      ep->close_on_write = 1;
 
      return 0;
