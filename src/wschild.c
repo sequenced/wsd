@@ -217,11 +217,12 @@ static int
 sock_read(ep_t *ep)
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {     
-          printf("%s:%d: %s: fd=%d\n",
+          printf("%s:%d: %s: fd=%d, wrsz=%d\n",
                  __FILE__,
                  __LINE__,
                  __func__,
-                 ep->fd);
+                 ep->fd,
+                 buf_write_sz(ep->recv_buf));
      }
 
      AN(buf_write_sz(ep->recv_buf));
@@ -245,7 +246,7 @@ static int
 sock_write(ep_t *ep)
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, read_sz=%d\n",
+          printf("%s:%d: %s: fd=%d, rdsz=%d\n",
                  __FILE__,
                  __LINE__,
                  __func__,

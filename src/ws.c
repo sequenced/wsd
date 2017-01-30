@@ -305,6 +305,9 @@ ws_recv(ep_t *ep)
      while (1) {
           int rv = process_frame(ep);
 
+          if (0 > rv)
+               return rv;
+
           if (0 == buf_read_sz(ep->recv_buf)) {
                buf_reset(ep->recv_buf);
           } else {
@@ -312,9 +315,6 @@ ws_recv(ep_t *ep)
           }
 
           if (1 == rv)
-               break;
-
-          if (0 > rv)
                break;
      }
 
@@ -368,9 +368,15 @@ process_frame(ep_t *ep) {
 
      /* TODO check that payload64 has left-most bit off */
 
+     /* TODO Introduce a practical maximum payload size */
+     
      if (wsf.payload_len > buf_read_sz(ep->recv_buf)) {
           ep->recv_buf->rdpos = old_rdpos;
           return 1;
+     }
+
+     if (wsf.payload_len == 0) {
+          return 0;
      }
 
      decode(ep->recv_buf, &wsf);
