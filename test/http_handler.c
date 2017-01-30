@@ -39,7 +39,7 @@ main() {
           ep->proto.handshake = noop;
 
           int len;
-          assert(0 < (len = read(fd, ep->recv_buf, buf_write_sz(ep->recv_buf))));
+          assert(0 < (len = read(fd, ep->recv_buf, buf_wrsz(ep->recv_buf))));
           ep->recv_buf->wrpos += len;
           
           wsd_cfg=malloc(sizeof(wsd_config_t));

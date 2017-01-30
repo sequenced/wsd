@@ -20,8 +20,8 @@
      if (exp) { perror(text); exit(1); }
 
 #define ep_connected(ep) (ep->fd != (-1))
-#define buf_read_sz(buf) (buf->wrpos - buf->rdpos)
-#define buf_write_sz(buf) ((unsigned int)sizeof(buf->p) - buf->wrpos)
+#define buf_rdsz(buf) (buf->wrpos - buf->rdpos)
+#define buf_wrsz(buf) ((unsigned int)sizeof(buf->p) - buf->wrpos)
 #define buf_reset(buf) buf->wrpos = 0; buf->rdpos = 0;
 #define buf_put(buf, obj)                       \
      *(typeof(obj)*)(&buf->p[buf->wrpos]) = obj; \

@@ -22,15 +22,15 @@ static int tokenise_connection(string_t *s);
 int
 http_recv(ep_t *ep)
 {
-     AN(buf_read_sz(ep->recv_buf));
+     AN(buf_rdsz(ep->recv_buf));
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, read_sz=%d\n",
+          printf("%s:%d: %s: fd=%d, rdsz=%d\n",
                  __FILE__,
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_read_sz(ep->recv_buf));
+                 buf_rdsz(ep->recv_buf));
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
@@ -167,7 +167,7 @@ http_prepare_response(buf2_t *b, const char *s)
      size_t len = strlen(s);
 
      /* see RFC2616 section 6.1.1 */
-     if (buf_write_sz(b) < len)
+     if (buf_wrsz(b) < len)
           return (-1);
 
      strcpy(&b->p[b->wrpos], s);

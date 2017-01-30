@@ -93,19 +93,19 @@ static int
 prepare_handshake(buf2_t *b, http_req_t *hr)
 {
      int len = strlen(HTTP_101);
-     if (buf_write_sz(b) < len)
+     if (buf_wrsz(b) < len)
           return -1;
      int old_wrpos = b->wrpos;
      strcpy(&b->p[b->wrpos], HTTP_101);
      b->wrpos += len;
 
      len = WS_ACCEPT_KEY_LEN + 2; /* +2: `\r\n' */
-     if (buf_write_sz(b) < len)
+     if (buf_wrsz(b) < len)
           goto error;
      if (0 > generate_accept_val(b, hr))
           goto error;
      len = strlen(WS_VER) + strlen(FLD_SEC_WS_VER_VAL) + 2; /* +2 `\r\n' */
-     if (buf_write_sz(b) < len)
+     if (buf_wrsz(b) < len)
           goto error;
      strcpy(&b->p[b->wrpos], WS_VER);
      b->wrpos += strlen(WS_VER);
@@ -117,7 +117,7 @@ prepare_handshake(buf2_t *b, http_req_t *hr)
      /* TODO for now echo back requested protocol */
      trim(&(hr->sec_ws_proto));
      len = strlen(WS_PROTO) + hr->sec_ws_proto.len + 2; /* +2 `\r\n' */
-     if (buf_write_sz(b) < len)
+     if (buf_wrsz(b) < len)
           goto error;
      strcpy(&b->p[b->wrpos], WS_PROTO);
      b->wrpos += strlen(WS_PROTO);
@@ -127,7 +127,7 @@ prepare_handshake(buf2_t *b, http_req_t *hr)
      buf_put(b, (char)'\n');
 
      /* terminating response as per RFC2616 section 6 */
-     if (buf_write_sz(b) < 2)
+     if (buf_wrsz(b) < 2)
           goto error;
      buf_put(b, (char)'\r');
      buf_put(b, (char)'\n');
@@ -195,7 +195,7 @@ ws_handshake(ep_t *ep, http_req_t *hr)
                  ep->fd);
      }
 
-     AN(buf_write_sz(ep->send_buf));
+     AN(buf_wrsz(ep->send_buf));
      if (0 > prepare_handshake(ep->send_buf, hr)) {
           if (0 > http_prepare_response(ep->send_buf, HTTP_500))
                return (-1);
@@ -239,7 +239,7 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
 
      unsigned long endpos = src->recv_buf->rdpos;
      AN(endpos);
-     while (buf_read_sz(src->recv_buf) && '\0' != src->recv_buf->p[endpos++]);
+     while (buf_rdsz(src->recv_buf) && '\0' != src->recv_buf->p[endpos++]);
      endpos--; /* Don't consider null terminator for payload length */
      A(src->recv_buf->rdpos < endpos);
      unsigned long payload_len = endpos - src->recv_buf->rdpos;
@@ -253,10 +253,10 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
                  payload_len);
      }
 
-     if (buf_write_sz(dst->send_buf) < frame_len) {
+     if (buf_wrsz(dst->send_buf) < frame_len) {
           /* Destination buffer too small, drop data */
           src->recv_buf->rdpos += payload_len;
-          if (0 == buf_read_sz(src->recv_buf))
+          if (0 == buf_rdsz(src->recv_buf))
                buf_reset(src->recv_buf);
 
           return 0;
@@ -275,7 +275,7 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
 
      src->recv_buf->rdpos++; /* Mark null terminator as read. */
      
-     if (0 == buf_read_sz(src->recv_buf))
+     if (0 == buf_rdsz(src->recv_buf))
           buf_reset(src->recv_buf);
 
      struct epoll_event ev;
@@ -291,15 +291,15 @@ ws_send_data_frame(struct endpoint *dst, struct endpoint *src)
 int
 ws_recv(ep_t *ep)
 {
-     AN(buf_read_sz(ep->recv_buf));
+     AN(buf_rdsz(ep->recv_buf));
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, read_sz=%d\n",
+          printf("%s:%d: %s: fd=%d, rdsz=%d\n",
                  __FILE__,
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_read_sz(ep->recv_buf));
+                 buf_rdsz(ep->recv_buf));
      }
 
      while (1) {
@@ -308,7 +308,7 @@ ws_recv(ep_t *ep)
           if (0 > rv)
                return rv;
 
-          if (0 == buf_read_sz(ep->recv_buf)) {
+          if (0 == buf_rdsz(ep->recv_buf)) {
                buf_reset(ep->recv_buf);
           } else {
                // TODO compact ep->recv_buf
@@ -324,15 +324,15 @@ ws_recv(ep_t *ep)
 static int
 process_frame(ep_t *ep) {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, read_sz=%d\n",
+          printf("%s:%d: %s: fd=%d, rdsz=%d\n",
                  __FILE__,
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_read_sz(ep->recv_buf));
+                 buf_rdsz(ep->recv_buf));
      }
 
-     if (buf_read_sz(ep->recv_buf) < WS_MASKED_FRAME_LEN) {
+     if (buf_rdsz(ep->recv_buf) < WS_MASKED_FRAME_LEN) {
           /* need WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2 */
           return 1;
      }
@@ -370,7 +370,7 @@ process_frame(ep_t *ep) {
 
      /* TODO Introduce a practical maximum payload size */
      
-     if (wsf.payload_len > buf_read_sz(ep->recv_buf)) {
+     if (wsf.payload_len > buf_rdsz(ep->recv_buf)) {
           ep->recv_buf->rdpos = old_rdpos;
           return 1;
      }
@@ -456,12 +456,12 @@ fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf)
      /* extended payload length; see RFC6455 section 5.2 */
      wsf->payload_len = PAYLOAD_LEN(wsf->byte2);
      if (wsf->payload_len < 126) {
-          if (buf_read_sz(b) < 4)
+          if (buf_rdsz(b) < 4)
                return -1;
 
           buf_get(b, wsf->masking_key);
      } else if (wsf->payload_len == 126) {
-          if (buf_read_sz(b) < (2 + 4))
+          if (buf_rdsz(b) < (2 + 4))
                return -1;
 
           unsigned short len;
@@ -469,7 +469,7 @@ fill_in_wsframe_details(buf2_t *b, wsframe_t *wsf)
           wsf->payload_len = be16toh(len);
           buf_get(b, wsf->masking_key);
      } else if (wsf->payload_len == 127) {
-          if (buf_read_sz(b) < (2 + 8))
+          if (buf_rdsz(b) < (2 + 8))
                return -1;
 
           unsigned long len;
@@ -486,7 +486,7 @@ close_frame(ep_t *ep, wsframe_t *wsf)
 {
      int rv = 0;
      unsigned short status = 0;
-     if (WS_FRAME_STATUS_LEN <= buf_write_sz(ep->send_buf)) {
+     if (WS_FRAME_STATUS_LEN <= buf_wrsz(ep->send_buf)) {
           buf_get(ep->recv_buf, status);
           status = be16toh(status);
      }
@@ -548,7 +548,7 @@ pong_frame(ep_t *ep, wsframe_t *wsf)
 static int
 prepare_close_frame(buf2_t *b, int status)
 {
-     if (buf_write_sz(b) < WS_UNMASKED_FRAME_LEN)
+     if (buf_wrsz(b) < WS_UNMASKED_FRAME_LEN)
           return -1;
 
      char byte1 = 0, byte2 = 0;
@@ -620,7 +620,7 @@ set_payload_len(buf2_t *b, const unsigned long payload_len)
 {
      char byte2 = 0;
 
-     if (buf_write_sz(b) < 1)
+     if (buf_wrsz(b) < 1)
           return (-1);
 
      if (payload_len < 126) {
@@ -630,7 +630,7 @@ set_payload_len(buf2_t *b, const unsigned long payload_len)
           set_payload_bits(byte2, 126);
           buf_put(b, byte2);
 
-          if (buf_write_sz(b) < 2)
+          if (buf_wrsz(b) < 2)
                return (-1);
 
           buf_put(b, (short)htobe16(payload_len));
@@ -638,7 +638,7 @@ set_payload_len(buf2_t *b, const unsigned long payload_len)
           set_payload_bits(byte2, 127);
           buf_put(b, byte2);
 
-          if (buf_write_sz(b) < 8)
+          if (buf_wrsz(b) < 8)
                return (-1);
 
           buf_put(b, (unsigned long)htobe64(payload_len));

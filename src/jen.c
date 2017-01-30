@@ -58,7 +58,7 @@ jen_recv_data_frame(ep_t *ep, wsframe_t *wsf)
 
      /* hash + frame length + '\0' */
      int len = sizeof(long unsigned int) + wsf->payload_len + 1;
-     if (buf_write_sz(jen_sock->send_buf) < len)
+     if (buf_wrsz(jen_sock->send_buf) < len)
           return (-1);
 
      buf_put(jen_sock->send_buf, ep->hash);
@@ -184,10 +184,10 @@ sock_write(ep_t *ep)
 
      A(ep->fd >= 0);
      A(ep->send_buf->p);
-     A(buf_read_sz(ep->send_buf) > 0);
+     A(buf_rdsz(ep->send_buf) > 0);
      int len = write(ep->fd,
                      ep->send_buf->p + ep->send_buf->rdpos,
-                     buf_read_sz(ep->send_buf));
+                     buf_rdsz(ep->send_buf));
      if (0 < len) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {          
                printf("\t%s: wrote %d byte(s)\n",
@@ -196,7 +196,7 @@ sock_write(ep_t *ep)
           }
 
           ep->send_buf->rdpos += len;
-          AZ(buf_read_sz(ep->send_buf));
+          AZ(buf_rdsz(ep->send_buf));
           buf_reset(ep->send_buf);
 
           struct epoll_event ev;
@@ -241,10 +241,10 @@ sock_read(ep_t *ep)
                  ep->fd);
      }
 
-     A(0 < buf_write_sz(ep->recv_buf));
+     A(0 < buf_wrsz(ep->recv_buf));
      int len = read(ep->fd,
                     ep->recv_buf->p + ep->recv_buf->wrpos,
-                    buf_write_sz(ep->recv_buf));
+                    buf_wrsz(ep->recv_buf));
      if (0 > len) {
           if (ECONNREFUSED == errno) {
                if (LOG_VVERBOSE <= wsd_cfg->verbose) {
@@ -279,7 +279,7 @@ sock_read(ep_t *ep)
                printf("\t%s: no socket for hash: 0x%lx, dropping %d byte(s)\n",
                       __func__,
                       hash,
-                      buf_read_sz(ep->recv_buf));
+                      buf_rdsz(ep->recv_buf));
           }
           /* Socket closed; drop data on the floor */
           buf_reset(ep->recv_buf);
