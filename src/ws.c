@@ -311,7 +311,7 @@ ws_recv(ep_t *ep)
           if (0 == buf_rdsz(ep->recv_buf)) {
                buf_reset(ep->recv_buf);
           } else {
-               // TODO compact ep->recv_buf
+               buf_compact(ep->recv_buf);
           }
 
           if (1 == rv)

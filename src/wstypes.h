@@ -30,6 +30,11 @@
      obj = *(typeof(obj)*)(&buf->p[buf->rdpos]); \
      buf->rdpos += sizeof(typeof(obj));
 
+#define buf_compact(buf)                                        \
+     memmove(buf->p, buf->p + buf->rdpos, buf_rdsz(buf));       \
+     buf->wrpos -= buf->rdpos;                                  \
+     buf->rdpos = 0;
+
 #define BUF_SIZE      2048
 #define UNASSIGNED    (-1)
 #define LOG_VVVERBOSE 3
