@@ -225,8 +225,16 @@ sock_read(ep_t *ep)
                  buf_wrsz(ep->recv_buf));
      }
 
+     if (ep->waited) {
+          ep->waited = 0;
+          AN(ep->proto.recv);
+          return ep->proto.recv(ep);
+     }
+
      AN(buf_wrsz(ep->recv_buf));
-     int len = read(ep->fd, ep->recv_buf->p, buf_wrsz(ep->recv_buf));
+     int len = read(ep->fd,
+                    ep->recv_buf->p + ep->recv_buf->wrpos,
+                    buf_wrsz(ep->recv_buf));
      ERRET(0 > len, "read");
 
      /* EOF */
@@ -254,14 +262,11 @@ sock_write(ep_t *ep)
                  buf_rdsz(ep->send_buf));
      }
 
-     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          ep->send_buf->p[ep->send_buf->wrpos] = '\0';
-          printf("%s\n", &ep->send_buf->p[ep->send_buf->rdpos]);
-     }
-
      A(ep->fd >= 0);
      A(buf_rdsz(ep->send_buf) > 0);
-     int len = write(ep->fd, ep->send_buf->p, buf_rdsz(ep->send_buf));
+     int len = write(ep->fd,
+                     ep->send_buf->p + ep->send_buf->rdpos,
+                     buf_rdsz(ep->send_buf));
      if (0 < len) {
           if (LOG_VVERBOSE <= wsd_cfg->verbose) {
                printf("\t%s: wrote %d byte(s)\n", __func__, len);

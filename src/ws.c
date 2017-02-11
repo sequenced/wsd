@@ -308,11 +308,8 @@ ws_recv(ep_t *ep)
           if (0 > rv)
                return rv;
 
-          if (0 == buf_rdsz(ep->recv_buf)) {
-               buf_reset(ep->recv_buf);
-          } else {
+          if (0 == rv)
                buf_compact(ep->recv_buf);
-          }
 
           if (1 == rv)
                break;
@@ -324,16 +321,22 @@ ws_recv(ep_t *ep)
 static int
 process_frame(ep_t *ep) {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, rdsz=%d\n",
+          printf("%s:%d: %s: fd=%d, rdsz=%d, rdpos=%d\n",
                  __FILE__,
                  __LINE__,
                  __func__,
                  ep->fd,
-                 buf_rdsz(ep->recv_buf));
+                 buf_rdsz(ep->recv_buf),
+                 ep->recv_buf->rdpos);
      }
 
      if (buf_rdsz(ep->recv_buf) < WS_MASKED_FRAME_LEN) {
           /* need WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2 */
+
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: incomplete masked frame\n", __func__);
+          }
+
           return 1;
      }
 
@@ -354,6 +357,11 @@ process_frame(ep_t *ep) {
 
      if (0 > fill_in_wsframe_details(ep->recv_buf, &wsf)) {
           ep->recv_buf->rdpos = old_rdpos;
+
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: incomplete frame\n", __func__);
+          }
+
           return 1;
      }
 
@@ -372,6 +380,14 @@ process_frame(ep_t *ep) {
      
      if (wsf.payload_len > buf_rdsz(ep->recv_buf)) {
           ep->recv_buf->rdpos = old_rdpos;
+
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: incomplete payload: have %d, need %d byte(s)\n",
+                      __func__,
+                      buf_rdsz(ep->recv_buf),
+                      wsf.payload_len);
+          }
+
           return 1;
      }
 
@@ -380,7 +396,13 @@ process_frame(ep_t *ep) {
      }
 
      decode(ep->recv_buf, &wsf);
-     return dispatch(ep, &wsf);
+     int rv = dispatch(ep, &wsf);
+
+     if (1 == rv) {
+          ep->recv_buf->rdpos = old_rdpos;
+     }
+
+     return rv;
 }
 
 int

@@ -11,6 +11,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include "wstypes.h"
+#include "list.h"
 #include "hashtable.h"
 #include "jen.h"
 
@@ -19,6 +20,7 @@ extern DECLARE_HASHTABLE(ep_hash, 4);
 extern int epfd;
 
 static ep_t *jen_sock = NULL;
+static struct list_head *wait = NULL;
 
 static int sock_write(ep_t *ep);
 static int sock_read(ep_t *ep);
@@ -38,11 +40,12 @@ int
 jen_recv_data_frame(ep_t *ep, wsframe_t *wsf)
 {
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d\n",
+          printf("%s:%d: %s: fd=%d, rdpos=%d\n",
                  __FILE__,
                  __LINE__,
                  __func__,
-                 ep->fd);
+                 ep->fd,
+                 ep->recv_buf->rdpos);
      }
 
      if (!ep_connected(jen_sock)) {
@@ -58,8 +61,24 @@ jen_recv_data_frame(ep_t *ep, wsframe_t *wsf)
 
      /* hash + frame length + '\0' */
      int len = sizeof(long unsigned int) + wsf->payload_len + 1;
-     if (buf_wrsz(jen_sock->send_buf) < len)
-          return (-1);
+     if (buf_wrsz(jen_sock->send_buf) < len) {
+
+          struct epoll_event ev;
+          memset(&ev, 0, sizeof(ev));
+          ev.events = EPOLLRDHUP;
+          ev.data.ptr = ep;
+          AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
+
+          list_add_tail(&ep->wait_list_node, wait);
+
+          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
+               printf("\t%s: added to wait list: fd=%d\n",
+                      __func__,
+                      ep->fd);
+          }
+
+          return 1;
+     }
 
      buf_put(jen_sock->send_buf, ep->hash);
 
@@ -87,6 +106,11 @@ jen_close()
      if (jen_sock && 0 <= jen_sock->fd)
           AZ(sock_close(jen_sock));
 
+     if (wait) {
+          free(wait);
+          wait = NULL;
+     }
+
      return 0;
 }
 
@@ -104,6 +128,13 @@ jen_open()
           jen_sock = malloc(sizeof(ep_t));
           A(jen_sock);
           ep_init(jen_sock);
+     }
+
+     if (!wait) {
+          wait = malloc(sizeof(struct list_head));
+          A(wait);
+          memset(wait, 0, sizeof(struct list_head));
+          init_list_head(wait);
      }
 
      if (!ep_connected(jen_sock)) {
@@ -204,6 +235,27 @@ sock_write(ep_t *ep)
           ev.events = EPOLLIN | EPOLLRDHUP;
           ev.data.ptr = ep;
           AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
+
+          ep_t *pos = NULL;
+          ep_t *i = NULL;
+          list_for_each_entry_safe(pos, i, wait, wait_list_node) {
+               list_del(&pos->wait_list_node);
+
+               pos->waited = 1;
+
+               struct epoll_event ev;
+               memset(&ev, 0, sizeof(ev));
+               ev.events = EPOLLIN | EPOLLRDHUP;
+               ev.data.ptr = pos;
+               AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, pos->fd, &ev));
+
+               if (LOG_VVERBOSE <= wsd_cfg->verbose) {          
+                    printf("\t%s: removed from wait list: fd=%d\n",
+                           __func__,
+                           pos->fd);
+               }
+          }
+               
      } else {
           A(0 > len);
      }

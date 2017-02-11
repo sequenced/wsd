@@ -30,10 +30,12 @@
      obj = *(typeof(obj)*)(&buf->p[buf->rdpos]); \
      buf->rdpos += sizeof(typeof(obj));
 
-#define buf_compact(buf)                                        \
-     memmove(buf->p, buf->p + buf->rdpos, buf_rdsz(buf));       \
-     buf->wrpos -= buf->rdpos;                                  \
-     buf->rdpos = 0;
+#define buf_compact(buf)                                         \
+     {                                                           \
+          memmove(buf->p, buf->p + buf->rdpos, buf_rdsz(buf));   \
+          buf->wrpos -= buf->rdpos;                              \
+          buf->rdpos = 0;                                        \
+     }
 
 #define BUF_SIZE      2048
 #define UNASSIGNED    (-1)
@@ -97,8 +99,10 @@ struct endpoint {
      int (*write)(struct endpoint *ep);
      int (*close)(struct endpoint *ep);
      struct hlist_node hash_node;
+     struct list_head wait_list_node;
      unsigned char close_on_write:1;
      unsigned char closing:1;
+     unsigned char waited:1;
      proto_t proto;
 };
 typedef struct endpoint ep_t;
