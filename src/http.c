@@ -250,7 +250,7 @@ is_complete_http_header(buf2_t *b)
               && *(s + 1) == '\n'
               && *(s + 2) == '\r'
               && *(s + 3) == '\n')
-               return 0;
+               return 1;
 
           s++;
      }
