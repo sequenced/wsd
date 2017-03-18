@@ -18,6 +18,7 @@ static int is_valid_upgrade_header_field(http_req_t *hr);
 static int is_valid_connection_header_field(http_req_t *hr);
 static int found_upgrade(string_t *result);
 static int tokenise_connection(string_t *s);
+static int is_complete_http_header(buf2_t *b);
 
 int
 http_recv(ep_t *ep)
@@ -37,6 +38,9 @@ http_recv(ep_t *ep)
           ep->recv_buf->p[ep->recv_buf->wrpos] = '\0';
           printf("%s\n", &ep->recv_buf->p[ep->recv_buf->rdpos]);
      }
+
+     if (!is_complete_http_header(ep->recv_buf))
+          return 0;
 
      int rv;
      string_t t;
@@ -233,4 +237,23 @@ is_valid_connection_header_field(http_req_t *hr)
      
      /* Got two ... */
      return tokenise_connection(&hr->conn2);
+}
+
+static int
+is_complete_http_header(buf2_t *b)
+{
+     int len = buf_rdsz(b);
+     char *s = &b->p[b->rdpos];
+     while (len--) {
+          if (*s == '\r'
+              && 3 <= len
+              && *(s + 1) == '\n'
+              && *(s + 2) == '\r'
+              && *(s + 3) == '\n')
+               return 0;
+
+          s++;
+     }
+
+     return 0;
 }
