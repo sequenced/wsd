@@ -1,0 +1,38 @@
+.TH wscat 8 "August 11th, 2017" 0.2
+.SH NAME
+wscat \- write to and read from websocket
+.SH SYNOPSIS
+.SP
+.B wscat
+[OPTIONS]
+.I [HOST[PORT]]
+.SH DESCRIPTION
+The
+.B wscat
+command writes to and reads from a remote system via websocket protocol RFC 6455. It reads from standard input and writes to standard output. The command can be used interactively and non-interactively.
+.SH OPTIONS
+.TP
+.IP "-A, --user-agent"
+Sets User-Agent string in HTTP upgrade request. The default value is \fBwscat\fR.
+.TP
+.IP "-V, --sec-ws-ver"
+Sets Sec-WebSocket-Version string in HTTP upgrade request. The default value is \fB13\fR.
+.TP
+.IP "-P, --sec-ws-proto"
+Sets Sec-WebSocket-Protocol string in HTTP upgrade request. By default this string is omitted.
+.TP
+.IP "-K, --sec-ws-key"
+Sets Sec-WebSocket-Key string in HTTP upgrade request. By default wscat calculates a pseudo-random value.
+.TP
+.IP "-i, --idle-timeout"
+The maximum time in milliseconds that you allow wscat to idle after a read from or write to websocket. By default the command does not timeout.
+.TP
+.IP "-v, --verbose"
+Enables diagnostic information. Use this option multiple times for maximum effect.
+.TP
+.IP "-h, --help"
+Displays help and exits.
+.SH BUGS
+Please report to bugs@sequencedsystems.com.
+.SH "SEE ALSO"
+.BR wsd (8)
