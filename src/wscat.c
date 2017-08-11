@@ -621,7 +621,7 @@ void
 print_help(const char *bin)
 {
      printf("Usage: %s [OPTION]... [HOST [PORT]]\n", bin);
-     printf("Concatenate standard input with remote system HOST via websocket protocol.\n\n");
+     printf("Write to and read from remote system HOST via websocket protocol.\n\n");
      printf(" -A, --user-agent\tset User-Agent string in HTTP upgrade request\n");
      printf(" -V, --sec-ws-ver\tset Sec-WebSocket-Version string\n");
      printf(" -P, --sec-ws-proto\tset Sec-WebSocket-Protocol string\n");
