@@ -1,6 +1,8 @@
-#ifndef __WSCHILD_H__
-#define __WSCHILD_H__
+#ifndef __WSCHILD2_H__
+#define __WSCHILD2_H__
+
+#include "types.h"
 
 int wschild_main(const wsd_config_t *cfg);
 
-#endif /* #ifndef __WSCHILD_H__ */
+#endif /* #ifndef __WSCHILD2_H__ */

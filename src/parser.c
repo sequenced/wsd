@@ -2,12 +2,13 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <strings.h>
-#include <errno.h>
 #include <ctype.h>
 #include "parser.h"
 
 #define CRLF 0x0a0d
 #define HTTP_version 0x312e312f50545448
+
+extern unsigned int wsd_errno;
 
 static unsigned int
 is_rfc7230_start_line(char c)
@@ -78,7 +79,7 @@ is_rfc7230_header_field(char c)
 }
 
 int
-http_header_tok(char *s, string_t *result)
+http_header_tok(char *s, chunk_t *result)
 {
      static char *prev = NULL;
 
@@ -88,12 +89,12 @@ http_header_tok(char *s, string_t *result)
      else
           prev = NULL;
 
-     result->start = NULL;
+     result->p = NULL;
      result->len = 0;
-     errno = 0;
+     wsd_errno = 0;
      
      if (NULL == cur) {
-          errno = EINPUT;
+          wsd_errno = WSD_EINPUT;
           return (-1);
      }
 
@@ -107,7 +108,7 @@ http_header_tok(char *s, string_t *result)
           while (is_rfc7230_header_field(*cur++));
 
           if (NULL == cur) {
-               errno = EUNEXPECTED_EOS;
+               wsd_errno = WSD_EEOS;
                return (-1);
           } else if (':' != *(char*)(cur - 1))
                goto finish;
@@ -118,16 +119,16 @@ http_header_tok(char *s, string_t *result)
 finish:
      /* cur should point to CRLF; otherwise it's an error */
      if (NULL == cur) {
-          errno = EUNEXPECTED_EOS;
+          wsd_errno = WSD_EEOS;
           return (-1);
      } else if (CRLF != *(short*)(cur - 1)) {
           /* Implementing as MUST; see RFC7230, section 3.5 */
-          errno = EUNEXPECTED_CHAR;
+          wsd_errno = WSD_ECHAR;
           return (-1);
      }
 
      prev = cur + 1; /* exited w/ cur = lf; skip LF */
-     result->start = start;
+     result->p = start;
      result->len = cur - start - 1; /* excludes CRLF */
      
      return result->len;
@@ -135,27 +136,27 @@ finish:
 
 /* Parses HTTP 1.1 request line as per RFC7230 */
 int
-parse_request_line(string_t *tok, http_req_t *req)
+parse_request_line(chunk_t *tok, http_req_t *req)
 {
      if (NULL == tok || 0 == tok->len) {
-          errno = EINPUT;
+          wsd_errno = WSD_EINPUT;
           return (-1);
      }
 
      int i = 0;
-     char *cur = tok->start;
+     char *cur = tok->p;
      /* Request method is case-sensitive; see section 3.1.1 */
      while (i++ < tok->len)
           if (!isupper(*cur++))
                break;
 
-     int len = cur - tok->start;
+     int len = cur - tok->p;
      if (0 == len || ' ' != *(cur - 1)) {
-          errno = EUNEXPECTED_CHAR;
+          wsd_errno = WSD_ECHAR;
           return (-1);
      }
 
-     req->method.start = tok->start;
+     req->method.p = tok->p;
      req->method.len = len - 1; /* excludes SP */
 
      char *start = cur;
@@ -165,39 +166,39 @@ parse_request_line(string_t *tok, http_req_t *req)
 
      len = cur - start;
      if (0 == len || i == len) {
-          errno = EUNEXPECTED_CHAR;
+          wsd_errno = WSD_ECHAR;
           return (-1);
      }
 
-     req->req_target.start = start;
+     req->req_target.p = start;
      req->req_target.len = len - 1; /* excludes SP */
 
      if (8 != (tok->len - i)
          || HTTP_version != *(long long*)(cur)) {
-          errno = EUNEXPECTED_CHAR;
+          wsd_errno = WSD_ECHAR;
           return (-1);
      }
 
-     req->http_ver.start = start;
+     req->http_ver.p = start;
      req->http_ver.len = 8;
 
      return 0;
 }
 
 #define ASSIGN(to)                              \
-     to.start = tok->start + len;               \
+     to.p = tok->p + len;               \
      to.len = tok->len - len;
 
 #define CMP(to, to_len)                         \
-     (0 == strncasecmp(tok->start, to, to_len))
+     (0 == strncasecmp(tok->p, to, to_len))
 
 int
-parse_header_field(string_t *tok, http_req_t *req)
+parse_header_field(chunk_t *tok, http_req_t *req)
 {
-     char *cur = tok->start;
+     char *cur = tok->p;
      while (':' != *cur++);
 
-     int len = cur - tok->start; /* inclusive colon */
+     int len = cur - tok->p; /* inclusive colon */
 
      if (CMP("Host", 4)) {
           ASSIGN(req->host);
@@ -245,42 +246,42 @@ parse_header_field(string_t *tok, http_req_t *req)
 
 /* "," delimits s; if not then simply returns result = s */
 int
-http_field_value_tok(string_t *s, string_t *result)
+http_field_value_tok(chunk_t *s, chunk_t *result)
 {
-     static string_t *prev = NULL;
+     static chunk_t *prev = NULL;
 
-     string_t *cur = s;
+     chunk_t *cur = s;
      if (NULL == cur)
           cur = prev;
      else
           prev = NULL;
 
-     result->start = NULL;
+     result->p = NULL;
      result->len = 0;
      
      if (NULL == cur) {
-          errno = EINPUT;
+          wsd_errno = WSD_EINPUT;
           return (-1);
      }
 
      if (0 > cur->len) {
-          errno = EINPUT;
+          wsd_errno = WSD_EINPUT;
           return (-1);
      }
 
-     char *start = cur->start;
+     char *start = cur->p;
      int found = 0, len = cur->len;
      while (cur->len--) {
-          if (',' == *cur->start++) {
+          if (',' == *cur->p++) {
                found = 1;
                break;
           }
      }
 
      prev = cur;
-     result->start = start;
+     result->p = start;
      if (found)
-          result->len = cur->start - start - 1; /* minus comma */
+          result->len = cur->p - start - 1; /* minus comma */
      else
           result->len = len;
 

@@ -1,338 +1,332 @@
 #define _GNU_SOURCE
+
 #include <time.h>
-#include <fcntl.h>
 #include <errno.h>
-#include <unistd.h>
+#include <time.h>
+#include <string.h>
 #include <syslog.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <signal.h>
-#include <stdio.h>
-#include <string.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/epoll.h>
-#include "wstypes.h"
+#include <sys/socket.h>
+
+#ifdef WSD_DEBUG
+#include <stdio.h>
+#endif
+
+#include "common.h"
 #include "hashtable.h"
 #include "http.h"
 #include "ws.h"
+#include "pp2.h"
+#include "wschild.h"
 
-#define MAX_EVENTS 256
-#define DEFAULT_QUANTUM 5000
+#define MAX_EVENTS      256
+#define DEFAULT_TIMEOUT 128
 
+DEFINE_HASHTABLE(sk_hash, 4);
+struct timespec *ts_now = NULL;
 const wsd_config_t *wsd_cfg = NULL;
-
-DEFINE_HASHTABLE(ep_hash, 4);
-int epfd;
+int epfd = -1;
+unsigned int wsd_errno = WSD_CHECKERRNO;
+sk_t *pp2_sk = NULL;
 
 static bool done = false;
+static struct list_head *work_list = NULL;
 
-static int sock_read(ep_t *ep);
-static int sock_write(ep_t *ep);
-static int sock_close(ep_t *ep);
-static int sock_accept(int lfd);
 static int io_loop();
 static void sigterm(int sig);
-static long unsigned int hash(struct sockaddr_in *saddr, struct timespec *ts);
+static int sock_accept(int lfd);
+static int sock_close(sk_t *sk);
+static int pp2_sock_open();
+static int post_read(sk_t *sk);
+static unsigned long int hash(struct sockaddr_in *saddr);
+static void list_init(struct list_head **list);
+static void on_iteration();
 
 int
 wschild_main(const wsd_config_t *cfg)
 {
      wsd_cfg = cfg;
 
+     ts_now = malloc(sizeof(struct timespec));
+     A(ts_now);
+     memset(ts_now, 0, sizeof(struct timespec));
+
+     list_init(&work_list);
+     hash_init(sk_hash);
+
      struct sigaction sac;
      memset(&sac, 0x0, sizeof(struct sigaction));
      sac.sa_handler = sigterm;
      AZ(sigaction(SIGTERM, &sac, NULL));
 
-     hash_init(ep_hash);
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: endpoint hashtable has %lu entries\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 sizeof ep_hash);
-     }
-
      epfd = epoll_create(1);
      A(epfd >= 0);
 
      AZ(listen(wsd_cfg->lfd, 5));
-
+     
      struct epoll_event ev;
-     memset((void*)&ev, 0, sizeof(ev));
+     memset(&ev, 0x0, sizeof(ev));
      ev.events = EPOLLIN;
      ev.data.fd = wsd_cfg->lfd;
      AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, wsd_cfg->lfd, &ev));
 
-     return io_loop();
+     pp2_sock_open();
+
+     int rv = io_loop();
+
+     free(ts_now);
+
+     return rv;
 }
 
-static void
-sigterm(int sig)
+int
+io_loop()
 {
-     done = true;
-}
-
-static int
-io_loop() {
+     int rv = 0;
      struct epoll_event evs[MAX_EVENTS];
-     memset((void*)&evs, 0, sizeof(evs));
+     memset(&evs, 0x0, sizeof(evs));
 
+     int timeout = DEFAULT_TIMEOUT;
      while (!done) {
-          int nfd = epoll_wait(epfd, evs, MAX_EVENTS, DEFAULT_QUANTUM);
+
+          int nfd = epoll_wait(epfd, evs, MAX_EVENTS, timeout);
           if (0 > nfd && EINTR == errno)
                continue;
           A(nfd >= 0);
           A(nfd <= MAX_EVENTS);
 
-          if (0 < nfd && LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("%s:%d: %s: nfd=%d\n",
-                      __FILE__,
-                      __LINE__,
-                      __func__,
-                      nfd);
-          }
-
           int n;
-          for (n = 0; n < nfd; ++n) {
+          for (n = 0; n < nfd; n++) {
 
                if (evs[n].data.fd == wsd_cfg->lfd) {
-                    AZ(sock_accept(evs[n].data.fd));
+                    sock_accept(evs[n].data.fd);
                     continue;
                }
 
-               ep_t *ep = (ep_t*)evs[n].data.ptr;
+               rv = on_epoll_event(&evs[n], post_read);
+          }
 
-               if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-                    printf("\t%s: fd=%d, events=0x%x\n",
-                           __func__,
-                           ep->fd,
-                           evs[n].events);
+          on_iteration();
+     }
+
+     return rv;
+}
+
+void
+on_iteration() {
+     sk_t *pos = NULL, *k = NULL;
+     list_for_each_entry_safe(pos, k, work_list, work_node) {
+
+          int rv = pos->ops->recv(pos);
+          if (0 == rv) {
+
+               /* All data received and processed */
+               list_del(&pos->work_node);
+
+          } else if (0 > rv && wsd_errno == WSD_EINPUT) {
+
+               /* 
+                * No enough input; delete from work list.
+                * Next read puts it into work list again.
+                */
+               list_del(&pos->work_node);
+
+          } else if (0 > rv && wsd_errno == WSD_EAGAIN) {
+
+               /* Try again on next iteration. */
+
+          } else if (0 > rv) {
+
+               /* Fatal error. */
+               list_del(&pos->work_node);
+               if (!pos->close_on_write) {
+                    AZ(pos->ops->close(pos));
                }
 
-               A(ep->read);
-               A(ep->write);
-               A(ep->close);
+          }
+     }
+}
 
-               if (evs[n].events & EPOLLIN ||
-                   evs[n].events & EPOLLPRI) {
-                    int rv = ep->read(ep);
-                    if (0 > rv) {
-                         AZ(ep->close(ep));
-                    } else {
-                         A(0 <= rv);
+int
+sock_close(sk_t *sk)
+{
+     hash_del(&sk->hash_node);
 
-                         if (0 == buf_rdsz(ep->send_buf))
-                              continue;
-
-                         struct epoll_event ev;
-                         memset(&ev, 0, sizeof(ev));
-                         ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
-                         ev.data.ptr = ep;
-                         AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
-                    }
-               } else if (evs[n].events & EPOLLOUT) {
-                    int rv = ep->write(ep);
-                    if (0 > rv) {
-                         AZ(ep->close(ep));
-                    } else {
-                         A(0 <= rv);
-                    }
-               } else if (evs[n].events & EPOLLHUP ||
-                          evs[n].events & EPOLLRDHUP ||
-                          evs[n].events & EPOLLERR) {
-                    AZ(ep->close(ep));
-               }
+     sk_t *pos = NULL, *k = NULL;
+     list_for_each_entry_safe(pos, k, work_list, work_node) {
+          if (sk->fd == pos->fd) {
+               list_del(&pos->work_node);
           }
      }
 
-     int bkt, num = 0;
-     ep_t *ep;
-     hash_for_each(ep_hash, bkt, ep, hash_node) {
-          AN(ep->close);
-          AZ(ep->close(ep));
-
-          if (ep->proto.close)
-               AZ(ep->proto.close());
-
-          num++;
-     }
-     AZ(close(wsd_cfg->lfd));
-     num++;
-     syslog(LOG_INFO, "closed %d socket(s)", num);
+     AZ(close(sk->fd));
+     sock_destroy(sk);
+     free(sk);
 
      return 0;
 }
 
-static int
+int
+post_read(sk_t *sk)
+{
+     sk_t *pos;
+     list_for_each_entry(pos, work_list, work_node) {
+          if (pos->fd == sk->fd)
+               return 0;
+     }
+
+     list_add_tail(&sk->work_node, work_list);
+
+     return 0;
+}
+
+void
+sigterm(int sig)
+{
+     // TODO
+}
+
+int
 sock_accept(int lfd)
 {
      struct sockaddr_in saddr;
-     memset(&saddr, 0x0, sizeof(saddr));
+     memset(&saddr, 0, sizeof(saddr));
 
      socklen_t saddr_len = sizeof(saddr);
      int fd = accept4(lfd,
                       (struct sockaddr *)&saddr,
                       &saddr_len,
                       SOCK_NONBLOCK);
-     A(fd >= 0);
+     ERRET(0 > fd, "accept4");
 
-     struct epoll_event ev;
-     memset(&ev, 0, sizeof(ev));
-     ev.events = EPOLLIN | EPOLLRDHUP;
-     ev.data.ptr = malloc(sizeof(ep_t));
-     A(ev.data.ptr);
-     ep_t *ep = (ep_t*)ev.data.ptr;
-     ep_init(ep);
-     ep->fd = fd;
-     ep->read = sock_read;
-     ep->write = sock_write;
-     ep->close = sock_close;
-     ep->proto.recv = http_recv;
-     ep->proto.handshake = ws_handshake;
+     sk_t *sk = malloc(sizeof(sk_t));
+     if (!sk) {
+          AZ(close(fd));
+          wsd_errno = WSD_CHECKERRNO;
+          return (-1);
+     }
+     memset(sk, 0, sizeof(sk_t));
 
+     if (0 > sock_init(sk, fd, hash(&saddr))) {
+          AZ(close(fd));
+          wsd_errno = WSD_CHECKERRNO;
+          return (-1);
+     }
+
+     sk->ops->recv = http_recv;
+     sk->ops->close = sock_close;
+     sk->proto->decode_handshake = ws_decode_handshake;
+
+     if (0 > register_for_events(sk)) {
+          AZ(close(fd));
+          wsd_errno = WSD_CHECKERRNO;
+          return (-1);
+     }
+
+     hash_add(sk_hash, &sk->hash_node, sk->hash);
+
+     return 0;
+}
+
+unsigned long int
+hash(struct sockaddr_in *saddr) {
      struct timespec ts;
      memset((void*)&ts, 0, sizeof(ts));
      AZ(clock_gettime(CLOCK_REALTIME_COARSE, &ts));
-     ep->hash = hash(&saddr, &ts);
-     AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev));
 
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, hash=0x%lx\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 fd,
-                 ep->hash);
-     }
-
-     return 0;
-}
-
-static int
-sock_read(ep_t *ep)
-{
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {     
-          printf("%s:%d: %s: fd=%d, wrsz=%d\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 ep->fd,
-                 buf_wrsz(ep->recv_buf));
-     }
-
-     if (ep->waited) {
-          ep->waited = 0;
-          AN(ep->proto.recv);
-          return ep->proto.recv(ep);
-     }
-
-     AN(buf_wrsz(ep->recv_buf));
-     int len = read(ep->fd,
-                    ep->recv_buf->p + ep->recv_buf->wrpos,
-                    buf_wrsz(ep->recv_buf));
-     ERRET(0 > len, "read");
-
-     /* EOF */
-     if (0 == len)
-          return (-1);
-
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("\t%s: read %d byte(s)\n", __func__, len);
-     }
-
-     ep->recv_buf->wrpos += len;
-     AN(ep->proto.recv);
-     return ep->proto.recv(ep);
-}
-
-static int
-sock_write(ep_t *ep)
-{
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, rdsz=%d\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 ep->fd,
-                 buf_rdsz(ep->send_buf));
-     }
-
-     A(ep->fd >= 0);
-     A(buf_rdsz(ep->send_buf) > 0);
-     int len = write(ep->fd,
-                     ep->send_buf->p + ep->send_buf->rdpos,
-                     buf_rdsz(ep->send_buf));
-     if (0 < len) {
-          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s: wrote %d byte(s)\n", __func__, len);
-          }
-
-          ep->send_buf->rdpos += len;
-          AZ(buf_rdsz(ep->send_buf));
-          buf_reset(ep->send_buf);
-
-          if (0 == ep->send_buf->rdpos) {
-               struct epoll_event ev;
-               memset(&ev, 0, sizeof(ev));
-               ev.events = EPOLLIN | EPOLLRDHUP;
-               ev.data.ptr = ep;
-               AZ(epoll_ctl(epfd, EPOLL_CTL_MOD, ep->fd, &ev));
-
-               if (ep->close_on_write)
-                    sock_close(ep);
-          }
-     } else {
-          A(0 > len);
-     }
-
-     return len;
-}
-
-static int sock_close(ep_t *ep)
-{
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, wrsz=%d, read_size=%d\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 ep->fd,
-                 buf_wrsz(ep->send_buf),
-                 buf_wrsz(ep->recv_buf));
-     }
-
-     A(ep->hash != 0L);
-     A(ep->fd >= 0);
-     A(ep->close != NULL);
-     A(ep->read != NULL);
-     A(ep->write != NULL);
-     AZ(close(ep->fd));
-
-     if (hash_hashed(&ep->hash_node)) {
-          if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-               printf("\t%s: fd=%d: removing from hashtable\n",
-                      __func__,
-                      ep->fd);
-          }
-          hash_del(&ep->hash_node);
-     }
-
-     ep_destroy(ep);
-     free(ep);
-
-     return 0;
-}
-
-static long unsigned int
-hash(struct sockaddr_in *saddr, struct timespec *ts) {
-     long unsigned int h = saddr->sin_addr.s_addr;
+     unsigned long int h = saddr->sin_addr.s_addr;
      h <<= 16;
      h |= saddr->sin_port;
      h <<= 16;
-     h |= ((ts->tv_nsec &0x00000000ffff0000 >> 16));
+     h |= ((ts.tv_nsec &0x00000000ffff0000 >> 16));
      return h;
+}
+
+static int
+pp2_sock_open()
+{
+     AZ(pp2_sk);
+     pp2_sk = malloc(sizeof(sk_t));
+     if (!pp2_sk) {
+          wsd_errno = WSD_ENOMEM;
+          goto error;
+     }
+     memset(pp2_sk, 0, sizeof(sk_t));
+
+     int fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
+     if (0 > fd) {
+          wsd_errno = WSD_CHECKERRNO;
+          goto error;
+     }
+
+     struct addrinfo hints, *res;
+     memset(&hints, 0, sizeof(struct addrinfo));
+     hints.ai_family = AF_INET;
+     hints.ai_socktype = SOCK_STREAM;
+     hints.ai_flags = AI_NUMERICSERV;
+     int rv = getaddrinfo(wsd_cfg->fwd_hostname,
+                          wsd_cfg->fwd_port,
+                          &hints,
+                          &res);
+     if (0 > rv) {
+#ifdef WSD_DEBUG
+          printf("\tcannot resolve %s\n", gai_strerror(rv));
+#endif
+          goto error;
+     }
+     AZ(res->ai_next);
+     if (AF_INET != res->ai_family) {
+          wsd_errno = WSD_ENUM;
+          goto error;
+     }
+
+     rv = connect(fd, res->ai_addr, res->ai_addrlen);
+     freeaddrinfo(res);
+     if (0 > rv && EINPROGRESS != errno) {
+#ifdef WSD_DEBUG
+          printf("\tconnect: %s\n", strerror(errno));
+#endif
+
+          wsd_errno = WSD_EBADREQ;
+          goto error;
+     }
+
+     if (0 > sock_init(pp2_sk, fd, -1ULL))
+          goto error;
+
+     pp2_sk->ops->recv = pp2_recv;
+     pp2_sk->ops->close = sock_close;
+     pp2_sk->proto->decode_frame = pp2_decode_frame;
+     pp2_sk->proto->encode_frame = pp2_encode_frame;
+
+     AZ(register_for_events(pp2_sk));
+
+     return 0;
+
+error:
+     if (pp2_sk) {
+          sock_destroy(pp2_sk);
+          free(pp2_sk);
+          pp2_sk = NULL;
+     }
+
+     return (-1);
+}
+
+void
+list_init(struct list_head **list)
+{
+     *list = malloc(sizeof(struct list_head));
+     AN(list);
+     memset(*list, 0, sizeof(struct list_head));
+     init_list_head(*list);
 }

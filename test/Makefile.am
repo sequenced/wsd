@@ -1,8 +1,9 @@
 TESTS = $(check_PROGRAMS)
-check_PROGRAMS = test1 test2 test3 test4 parser http_handler
-test1_LDADD = ../src/libtestcommon.a
+#check_PROGRAMS = test1 test2 test3 test4 parser http_handler
+check_PROGRAMS = test2 test4
+#test1_LDADD = ../src/libtestcommon.a
 test2_LDADD = ../src/libtestcommon.a
-test3_LDADD = ../src/libtestcommon.a
+#test3_LDADD = ../src/libtestcommon.a
 test4_LDADD = ../src/libtestcommon.a
-parser_LDADD = ../src/libtestcommon.a
-http_handler_LDADD = ../src/libtestcommon.a
+#parser_LDADD = ../src/libtestcommon.a
+#http_handler_LDADD = ../src/libtestcommon.a

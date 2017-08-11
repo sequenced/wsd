@@ -23,6 +23,7 @@ install-sh
 ltmain.sh
 stamp-h1
 src/wsd
+src/wscat
 src/.libs
 src/.dirstamp
 src/.deps

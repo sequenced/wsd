@@ -12,7 +12,6 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include "config.h"
-#include "wstypes.h"
 #include "wschild.h"
 
 static const char *ident = "wsd";
@@ -194,7 +193,7 @@ sock_init(int port)
 
 #ifndef SYS_LINUX
      /* TODO set non-blocking */
-#endif  
+#endif
 
      int opt = 1;
      AZ(setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)));

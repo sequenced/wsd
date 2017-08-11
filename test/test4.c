@@ -37,8 +37,12 @@ main(int argc, char **argv)
   memset((void*)&t, 0x0, sizeof(test4_t));
   init_list_head(&t.string_list);
 
+  assert(list_empty(&t.string_list));
+  assert(NULL == list_first_entry_or_null(&t.string_list, test4_t, list_head));
+
   test4_string_t *s=new_entry("one");
   list_add_tail(&s->list_head, &t.string_list);
+  assert(NULL != list_first_entry_or_null(&t.string_list, test4_t, list_head));
   s=new_entry("two");
   list_add_tail(&s->list_head, &t.string_list);
   s=new_entry("three");
@@ -54,10 +58,15 @@ main(int argc, char **argv)
   assert(!list_empty(&t.string_list));
 
   test4_string_t *tmp;
-  list_for_each_entry_safe(e, tmp, &t.string_list, list_head)
+  list_for_each_entry_safe(e, tmp, &t.string_list, list_head) {
     list_del(&e->list_head);
+    list_entry_zero(&e->list_head);
+    assert(NULL == e->list_head.prev);
+    assert(NULL == e->list_head.next);
+  }
 
   assert(list_empty(&t.string_list));
+  assert(NULL == list_first_entry_or_null(&t.string_list, test4_t, list_head));
 
   return 0;
 }
