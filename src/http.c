@@ -58,7 +58,7 @@ http_recv(sk_t *sk)
                printf("\t%s: errno=%d\n", __func__, errno);
           }
 
-          if (0 == skb_put_string(sk->sendbuf, HTTP_400)) {
+          if (0 == skb_put_str(sk->sendbuf, HTTP_400)) {
                sk->close_on_write = 1;
           }
 
@@ -68,7 +68,7 @@ http_recv(sk_t *sk)
      /* ... validate request line ... */
      if (!is_valid_req_line(&hreq)) {
 
-          if (0 == skb_put_string(sk->sendbuf, HTTP_400)) {
+          if (0 == skb_put_str(sk->sendbuf, HTTP_400)) {
                sk->close_on_write = 1;
           }
 
@@ -84,7 +84,7 @@ http_recv(sk_t *sk)
                     printf("\t%s: errno=%d\n", __func__, errno);
                }
 
-               if (0 == skb_put_string(sk->sendbuf, HTTP_400)) {
+               if (0 == skb_put_str(sk->sendbuf, HTTP_400)) {
                     sk->close_on_write = 1;
                }
 
@@ -103,7 +103,7 @@ http_recv(sk_t *sk)
            * Implementing as MUST; see RFC7230, section 5.4 and
            * RFC6455, section 4.1
            */
-          if (0 == skb_put_string(sk->sendbuf, HTTP_400)) {
+          if (0 == skb_put_str(sk->sendbuf, HTTP_400)) {
                sk->close_on_write = 1;
           }
 
@@ -116,7 +116,7 @@ http_recv(sk_t *sk)
                printf("\t%s: invalid upgrade header field\n", __func__);
           }
 
-          if (0 == skb_put_string(sk->sendbuf, HTTP_400)) {
+          if (0 == skb_put_str(sk->sendbuf, HTTP_400)) {
                sk->close_on_write = 1;
           }
 
@@ -129,7 +129,7 @@ http_recv(sk_t *sk)
                printf("\t%s: invalid connection header field\n", __func__);
           }
 
-          if (0 == skb_put_string(sk->sendbuf, HTTP_400)) {
+          if (0 == skb_put_str(sk->sendbuf, HTTP_400)) {
                sk->close_on_write = 1;
           }
 

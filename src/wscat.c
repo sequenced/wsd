@@ -16,7 +16,7 @@
 #include "parser.h"
 
 #define skb_put_chunk(dst, src)                 \
-     skb_put_stringn(dst, src.p, src.len)
+     skb_put_strn(dst, src.p, src.len)
 
 #define MAX_EVENTS       256
 #define DEFAULT_TIMEOUT  128
@@ -178,7 +178,7 @@ main(int argc, char **argv)
      
      AZ(skb_put_http_req(wssk->sendbuf, &req));
 
-     if (LOG_VERBOSE <= wsd_cfg->verbose) {
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           unsigned int len = skb_rdsz(wssk->sendbuf);
           skb_print(stdout, wssk->sendbuf, len);
           skb_rd_rewind(wssk->sendbuf, len);
@@ -332,7 +332,7 @@ post_read(sk_t *sk)
 int
 wssk_http_recv(sk_t *sk)
 {
-     if (LOG_VERBOSE <= wsd_cfg->verbose) {
+     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           unsigned int len = skb_rdsz(sk->recvbuf);
           skb_print(stdout, sk->recvbuf, len);
           skb_rd_rewind(sk->recvbuf, len);
@@ -437,13 +437,14 @@ wssk_ws_encode_data_frame(skb_t *dst, skb_t *src, unsigned int maxlen)
 
      skb_compact(src);
 
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("TX|0x%hhx|0x%hhx|opcode=0x%x|%hhu|payload len=%lu\n",
-                 wsf.byte1,
-                 wsf.byte2,
-                 OPCODE(wsf.byte1),
-                 MASK_BIT(wsf.byte2),
-                 wsf.payload_len);
+     if (LOG_VERBOSE <= wsd_cfg->verbose) {
+          fprintf(stderr,
+                  "TX:0x%hhx|0x%hhx|opcode=%hhu|maskbit=%hhu|payload_len=%lu\n",
+                  wsf.byte1,
+                  wsf.byte2,
+                  OPCODE(wsf.byte1),
+                  MASK_BIT(wsf.byte2),
+                  wsf.payload_len);
      }
 
      return 0;
@@ -586,33 +587,33 @@ skb_put_http_req(skb_t *buf, http_req_t *req)
      skb_put_chunk(buf, req->req_target);
      skb_put(buf, (char)' ');
      skb_put_chunk(buf, req->http_ver);
-     skb_put_stringn(buf, "\r\n", 2);
-     skb_put_stringn(buf, "Upgrade: websocket\r\n", 20);
-     skb_put_stringn(buf, "Connection: Upgrade\r\n", 21);
-     skb_put_stringn(buf, "Host: ", 6);
+     skb_put_strn(buf, "\r\n", 2);
+     skb_put_strn(buf, "Upgrade: websocket\r\n", 20);
+     skb_put_strn(buf, "Connection: Upgrade\r\n", 21);
+     skb_put_strn(buf, "Host: ", 6);
      skb_put_chunk(buf, req->host);
-     skb_put_stringn(buf, "\r\n", 2);
-     skb_put_stringn(buf, "Origin: http://", 15);
+     skb_put_strn(buf, "\r\n", 2);
+     skb_put_strn(buf, "Origin: http://", 15);
      skb_put_chunk(buf, req->origin);
-     skb_put_stringn(buf, "\r\n", 2);
+     skb_put_strn(buf, "\r\n", 2);
 
      if (req->sec_ws_proto.len) {
-          skb_put_stringn(buf, WS_PROTO, 24);
+          skb_put_strn(buf, WS_PROTO, 24);
           skb_put_chunk(buf, req->sec_ws_proto);
-          skb_put_stringn(buf, "\r\n", 2);
+          skb_put_strn(buf, "\r\n", 2);
      }
 
-     skb_put_stringn(buf, "Pragma: no-cache\r\n", 18);
-     skb_put_stringn(buf, "Cache-Control: no-cache\r\n", 25);
-     skb_put_stringn(buf, "Sec-WebSocket-Key: ", 19);
+     skb_put_strn(buf, "Pragma: no-cache\r\n", 18);
+     skb_put_strn(buf, "Cache-Control: no-cache\r\n", 25);
+     skb_put_strn(buf, "Sec-WebSocket-Key: ", 19);
      skb_put_chunk(buf, req->sec_ws_key);
-     skb_put_stringn(buf, "\r\n", 2);
-     skb_put_stringn(buf, WS_VER, 23);
+     skb_put_strn(buf, "\r\n", 2);
+     skb_put_strn(buf, WS_VER, 23);
      skb_put_chunk(buf, req->sec_ws_ver);
-     skb_put_stringn(buf, "\r\n", 2);
-     skb_put_stringn(buf, "User-Agent: ", 12);
+     skb_put_strn(buf, "\r\n", 2);
+     skb_put_strn(buf, "User-Agent: ", 12);
      skb_put_chunk(buf, req->user_agent);
-     skb_put_stringn(buf, "\r\n\r\n", 4);
+     skb_put_strn(buf, "\r\n\r\n", 4);
 
      return 0;
 }
@@ -662,13 +663,14 @@ wssk_ws_decode_frame(sk_t *sk)
           return (-1);
      }
 
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("RX|0x%hhx|0x%hhx|opcode=0x%x|%hhu|payload len=%lu\n",
-                 wsf.byte1,
-                 wsf.byte2,
-                 OPCODE(wsf.byte1),
-                 MASK_BIT(wsf.byte2),
-                 wsf.payload_len);
+     if (LOG_VERBOSE <= wsd_cfg->verbose) {
+          fprintf(stderr,
+                  "RX:0x%hhx|0x%hhx|opcode=%hhu|maskbit=%hhu|payload len=%lu\n",
+                  wsf.byte1,
+                  wsf.byte2,
+                  OPCODE(wsf.byte1),
+                  MASK_BIT(wsf.byte2),
+                  wsf.payload_len);
      }
 
      /* Protect against really large frames */

@@ -198,26 +198,35 @@ sigterm(int sig)
 int
 sock_accept(int lfd)
 {
-     struct sockaddr_in saddr;
-     memset(&saddr, 0, sizeof(saddr));
-
-     socklen_t saddr_len = sizeof(saddr);
-     int fd = accept4(lfd,
-                      (struct sockaddr *)&saddr,
-                      &saddr_len,
-                      SOCK_NONBLOCK);
-     ERRET(0 > fd, "accept4");
-
      sk_t *sk = malloc(sizeof(sk_t));
      if (!sk) {
-          AZ(close(fd));
           wsd_errno = WSD_CHECKERRNO;
           return (-1);
      }
      memset(sk, 0, sizeof(sk_t));
 
-     if (0 > sock_init(sk, fd, hash(&saddr))) {
+     socklen_t saddr_len = sizeof(sk->src_addr);
+     int fd = accept4(lfd,
+                      (struct sockaddr *)&sk->src_addr,
+                      &saddr_len,
+                      SOCK_NONBLOCK);
+     if (0 > fd) {
+          free(sk);
+          wsd_errno = WSD_CHECKERRNO;
+          return (-1);
+     }
+
+     saddr_len = sizeof(sk->dst_addr);
+     if (0 > getsockname(fd, (struct sockaddr *)&sk->dst_addr, &saddr_len)) {
           AZ(close(fd));
+          free(sk);
+          wsd_errno = WSD_CHECKERRNO;
+          return (-1);
+     }
+
+     if (0 > sock_init(sk, fd, hash(&sk->src_addr))) {
+          AZ(close(fd));
+          free(sk);
           wsd_errno = WSD_CHECKERRNO;
           return (-1);
      }
@@ -228,6 +237,7 @@ sock_accept(int lfd)
 
      if (0 > register_for_events(sk)) {
           AZ(close(fd));
+          free(sk);
           wsd_errno = WSD_CHECKERRNO;
           return (-1);
      }

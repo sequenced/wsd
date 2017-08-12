@@ -11,30 +11,57 @@
  * See http://www.haproxy.org/download/1.8/doc/proxy-protocol.txt
  */
 
+#include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sys/epoll.h>
+#include <string.h>
 
-#ifdef WSD_DEBUG
-#include <stdio.h>
+#ifdef HAVE_ENDIAN_H
+#include <endian.h>
+#else
+/* TODO */
 #endif
 
+#include <sys/epoll.h>
+#include <arpa/inet.h>
 #include "common.h"
 #include "list.h"
 #include "hashtable.h"
 #include "pp2.h"
 
-#define PP2_HEADER_LEN 18
+#define PP2_SIG_VER_CMD_FAM_LEN 14
+#define PP2_ADDR_LEN            12
+#define PP2_ADDR_TLVS_LEN       (18 + PP2_ADDR_LEN)
+#define PP2_HEADER_LEN         (2 + PP2_ADDR_TLVS_LEN + PP2_SIG_VER_CMD_FAM_LEN)
+#define PP2_VER_BITS(byte)      ((0xf0 & byte) >> 4)
+#define PP2_CMD_BITS(byte)      (0xf & byte)
+#define PP2_FAM_BITS(byte)      ((0xf0 & byte) >> 4)
+#define PP2_PROTO_BITS(byte)    (0xf & byte)
 
 extern sk_t *pp2_sk;
 extern unsigned int wsd_errno;
 extern DECLARE_HASHTABLE(sk_hash, 4);
+extern const wsd_config_t *wsd_cfg;
 
+static const uint8_t pp2_sig_ver_cmd_fam[] =
+{ 0x0d, 0x0a, 0x0d, 0x0a, 0x00, 0x0d, /* pp2 signature               */
+  0x0a, 0x51, 0x55, 0x49, 0x54, 0x0a, /* cont'd pp2 signature        */
+  0x21, 0x11 };                       /* version, command and family */
+static const uint8_t pp2_sig[] =
+{ 0x0d, 0x0a, 0x0d, 0x0a, 0x00, 0x0d, 0x0a, 0x51, 0x55, 0x49, 0x54, 0x0a };
+     
+static void pp2_put_proxy_hdr_v2(skb_t *dst, const uint8_t *h);
 static void pp2_put_connhash(skb_t *dst, long unsigned int hash);
 static void pp2_put_payloadlen(skb_t *dst, unsigned int len);
 static long int pp2_get_connhash(skb_t *src);
 static int pp2_get_payloadlen(skb_t *src);
-static int is_complete_pp2_frame_header(skb_t *skb);
+static void pp2_printf(FILE *stream, char *p);
+static void pp2_encode_header(skb_t *buf,
+                              struct sockaddr_in *src,
+                              struct sockaddr_in *dst,
+                              const unsigned long int hash,
+                              const unsigned long int payload_len);
 
 int
 pp2_recv(sk_t *sk)
@@ -57,27 +84,40 @@ pp2_recv(sk_t *sk)
 int
 pp2_decode_frame(sk_t *sk)
 {
-     if (!is_complete_pp2_frame_header(sk->recvbuf)) {
+     if (PP2_HEADER_LEN >= skb_rdsz(sk->recvbuf)) {
           wsd_errno = WSD_EINPUT;
           return (-1);
      }
 
-     int old_rdpos = sk->recvbuf->rdpos;
+     unsigned int old_rdpos = sk->recvbuf->rdpos;
 
+     struct proxy_hdr_v2 *hdr =
+          (struct proxy_hdr_v2*)&sk->recvbuf->data[sk->recvbuf->rdpos];
+     sk->recvbuf->rdpos += sizeof(struct proxy_hdr_v2);
+
+     if (0 != memcmp(hdr->sig, pp2_sig, sizeof(pp2_sig)))
+          goto error;
+
+     if (0x2 != PP2_VER_BITS(hdr->ver_cmd) ||
+         0x1 != PP2_CMD_BITS(hdr->ver_cmd) ||
+         0x1 != PP2_FAM_BITS(hdr->fam)     ||
+         0x1 != PP2_PROTO_BITS(hdr->fam))
+          goto error;
+     
+     union proxy_addr *addr =
+          (union proxy_addr*)&sk->recvbuf->data[sk->recvbuf->rdpos];
+     sk->recvbuf->rdpos += PP2_ADDR_LEN;
+     
      long int val = pp2_get_connhash(sk->recvbuf);
-     if (0 > val) {
-          sk->recvbuf->rdpos = old_rdpos;
-          wsd_errno = WSD_ENUM;
-          return (-1);
-     }
+     if (0 > val)
+          goto error;
+
      unsigned long int hash = (unsigned long int)val;
 
      val = pp2_get_payloadlen(sk->recvbuf);
-     if (0 > val) {
-          sk->recvbuf->rdpos = old_rdpos;
-          wsd_errno = WSD_ENUM;
-          return (-1);
-     }
+     if (0 > val)
+          goto error;
+
      unsigned int len = (unsigned int)val;
 
      if (skb_rdsz(sk->recvbuf) < len) {
@@ -103,6 +143,12 @@ pp2_decode_frame(sk_t *sk)
      wsf.payload_len = len;
      
      return cln_sk->proto->encode_frame(cln_sk, &wsf);
+
+     error:
+     sk->recvbuf->rdpos = old_rdpos;
+     wsd_errno = WSD_ENUM;
+ 
+     return (-1);
 }
 
 int
@@ -113,10 +159,17 @@ pp2_encode_frame(sk_t *sk, wsframe_t *wsf)
           return (-1);
      }
 
-     /* TODO put pp2 header */
+     pp2_encode_header(pp2_sk->sendbuf,
+                       &sk->src_addr,
+                       &sk->dst_addr,
+                       sk->hash,
+                       wsf->payload_len);
 
-     pp2_put_connhash(pp2_sk->sendbuf, sk->hash);
-     pp2_put_payloadlen(pp2_sk->sendbuf, wsf->payload_len);
+     if (LOG_VERBOSE <= wsd_cfg->verbose) {
+          pp2_printf(stdout,
+                     &pp2_sk->sendbuf->data[pp2_sk->sendbuf->wrpos -
+                                            PP2_HEADER_LEN]);
+     }
 
      unsigned int len = wsf->payload_len;
      while (len--)
@@ -128,16 +181,28 @@ pp2_encode_frame(sk_t *sk, wsframe_t *wsf)
      return 0;
 }
 
-int
-is_complete_pp2_frame_header(skb_t *skb)
+void
+pp2_encode_header(skb_t *buf,
+                  struct sockaddr_in *src,
+                  struct sockaddr_in *dst,
+                  const unsigned long int hash,
+                  const unsigned long int payload_len)
 {
-     if (skb_rdsz(skb) >= PP2_HEADER_LEN)
-          return 1;
+     memcpy(&buf->data[buf->wrpos],
+            pp2_sig_ver_cmd_fam,
+            PP2_SIG_VER_CMD_FAM_LEN);
+     buf->wrpos += PP2_SIG_VER_CMD_FAM_LEN;
 
-     return 0;
+     skb_put(buf, htobe16(PP2_ADDR_TLVS_LEN));
+     skb_put(buf, src->sin_addr);
+     skb_put(buf, dst->sin_addr);
+     skb_put(buf, src->sin_port);
+     skb_put(buf, dst->sin_port);
+     pp2_put_connhash(buf, hash);
+     pp2_put_payloadlen(buf, payload_len);
 }
 
-void
+inline void
 pp2_put_connhash(skb_t *dst, unsigned long int hash)
 {
      struct pp2_tlv *tlv = (struct pp2_tlv*)&dst->data[dst->wrpos];
@@ -148,7 +213,7 @@ pp2_put_connhash(skb_t *dst, unsigned long int hash)
      dst->wrpos += sizeof(struct pp2_tlv) + sizeof(unsigned long int);
 }
 
-void
+inline void
 pp2_put_payloadlen(skb_t *dst, unsigned int len)
 {
      struct pp2_tlv *tlv = (struct pp2_tlv*)&dst->data[dst->wrpos];
@@ -159,7 +224,7 @@ pp2_put_payloadlen(skb_t *dst, unsigned int len)
      dst->wrpos += sizeof(struct pp2_tlv) + sizeof(unsigned int);
 }
 
-long int
+inline long int
 pp2_get_connhash(skb_t *src)
 {
      struct pp2_tlv *tlv = (struct pp2_tlv*)&src->data[src->rdpos];
@@ -172,7 +237,7 @@ pp2_get_connhash(skb_t *src)
      return *(unsigned long int*)tlv->value;
 }
 
-int
+inline int
 pp2_get_payloadlen(skb_t *src)
 {
      struct pp2_tlv *tlv = (struct pp2_tlv*)&src->data[src->rdpos];
@@ -183,4 +248,30 @@ pp2_get_payloadlen(skb_t *src)
 
      src->rdpos += sizeof(struct pp2_tlv) + sizeof(unsigned int);
      return *(unsigned int*)tlv->value;
+}
+
+inline void
+pp2_printf(FILE *stream, char *p)
+{
+     struct proxy_hdr_v2 *hdr = (struct proxy_hdr_v2*)p;
+     union proxy_addr *addr =
+          (union proxy_addr*)(p + sizeof(struct proxy_hdr_v2));
+
+     char src[INET_ADDRSTRLEN], dst[INET_ADDRSTRLEN];
+
+     fprintf(stream,
+             "0x%hhx,0x%hhx,%hu,%s:%hu->%s:%hu\n",
+             hdr->ver_cmd,
+             hdr->fam,
+             be16toh(hdr->len),
+             inet_ntop(AF_INET,
+                       (void*)&addr->ipv4_addr.src_addr,
+                       src,
+                       INET_ADDRSTRLEN),
+             be16toh(addr->ipv4_addr.src_port),
+             inet_ntop(AF_INET,
+                       (void*)&addr->ipv4_addr.dst_addr,
+                       dst,
+                       INET_ADDRSTRLEN),
+             be16toh(addr->ipv4_addr.dst_port));
 }

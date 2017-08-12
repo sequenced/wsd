@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <netinet/in.h>
 #include "list.h"
 
 #define ALERT(func, file, line)                 \
@@ -80,7 +81,7 @@ typedef struct {
 struct proto;
 struct ops;
 
-/* socket details */
+/* Structure describing file descriptor, state, operations and protocol. */
 struct sk {
      int                fd;
      unsigned long int  hash;
@@ -95,6 +96,8 @@ struct sk {
      unsigned char      close:1;          /* close socket */
      unsigned char      closing:1;        /* closing handshake in progress   */
      struct timespec    ts_last_io;       /* records last I/O timestamp      */
+     struct sockaddr_in src_addr;         /* source address iff socket       */
+     struct sockaddr_in dst_addr;         /* destination address iff socket  */
 };
 typedef struct sk sk_t;
 

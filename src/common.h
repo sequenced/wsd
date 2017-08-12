@@ -30,10 +30,10 @@ void turn_off_events(sk_t *sk, unsigned int events);
 int on_epoll_event(struct epoll_event *evt, int (*post_read)(sk_t *sk));
 int has_rnrn_termination(skb_t *b);
 int register_for_events(sk_t *sk);
-int skb_put_string(skb_t *b, const char *s);
-int skb_put_stringn(skb_t *b, const char *s, unsigned int len);
+int skb_put_str(skb_t *b, const char *s);
+int skb_put_strn(skb_t *b, const char *s, size_t n);
 void skb_compact(skb_t *b);
-int skb_print(FILE *stream, skb_t *b, unsigned int len);
+int skb_print(FILE *stream, skb_t *b, size_t n);
 void trim(chunk_t *chk);
 char mask(char c, unsigned int i, unsigned int key);
 

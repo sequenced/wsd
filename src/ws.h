@@ -32,7 +32,7 @@
 #define RSV2_BIT(byte)        (0x20 & byte)
 #define RSV3_BIT(byte)        (0x10 & byte)
 #define OPCODE(byte)          (0xf & byte)
-#define MASK_BIT(byte)        (0x80 & byte)
+#define MASK_BIT(byte)        ((0x80 & byte) >> 7)
 #define PAYLOAD_LEN(byte)     (unsigned long int)(0x7f & byte)
 
 int ws_recv(sk_t *sk);

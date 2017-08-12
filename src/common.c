@@ -101,18 +101,18 @@ trim(chunk_t *chk)
 }
 
 inline int
-skb_put_string(skb_t *b, const char *s)
+skb_put_str(skb_t *b, const char *s)
 {
-     return skb_put_stringn(b, s, strlen(s));
+     return skb_put_strn(b, s, strlen(s));
 }
 
 inline int
-skb_put_stringn(skb_t *b, const char *s, unsigned int len) {
-     if (skb_wrsz(b) < len)
+skb_put_strn(skb_t *b, const char *s, size_t n) {
+     if (skb_wrsz(b) < n)
           return (-1);
 
-     strcpy(&b->data[b->wrpos], s);
-     b->wrpos += len;
+     strncpy(&b->data[b->wrpos], s, n);
+     b->wrpos += n;
 
      return 0;
 }
@@ -351,8 +351,8 @@ mask(char c, unsigned int i, unsigned int key)
 }
 
 int
-skb_print(FILE *stream, skb_t *b, unsigned int len) {
-     while (len--)
+skb_print(FILE *stream, skb_t *b, size_t n) {
+     while (n--)
           fprintf(stream, "%c", (unsigned char)b->data[b->rdpos++]);
 
      int rv;
