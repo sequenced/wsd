@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.67])
-AC_INIT([wsd], [0.16], [bugs@sequencedsystems.com])
+AC_INIT([wsd], [0.2], [bugs@sequencedsystems.com])
 AC_CONFIG_SRCDIR([src/wsd.c])
 AM_INIT_AUTOMAKE([-Wall -Werror])
 AM_PROG_CC_C_O
@@ -42,6 +42,6 @@ AC_TYPE_UID_T
 
 # Checks for library functions.
 AC_FUNC_FORK
-AC_CHECK_FUNCS([gettimeofday inet_ntoa memset socket strncasecmp strstr malloc])
+AC_CHECK_FUNCS([gettimeofday inet_ntop memset socket strncasecmp strstr malloc])
 
 AC_OUTPUT
