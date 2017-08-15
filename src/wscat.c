@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <netdb.h>
+#include <stdbool.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
@@ -33,14 +34,16 @@ static struct option long_opt[] = {
      {"sec-ws-key",   required_argument, 0, 'K'},
      {"user-agent",   required_argument, 0, 'A'},
      {"idle-timeout", required_argument, 0, 'i'},
+     {"json",         required_argument, 0, 'j'},
      {"verbose",      no_argument,       0, 'v'},
      {"help",         no_argument,       0, 'h'},
      {0, 0, 0, 0}
 };
-static const char *optstring = "V:P:K:A:i:vh";
+static const char *optstring = "V:P:K:A:i:vhj";
 static sk_t *fdin = NULL;
 static sk_t *wssk = NULL;
 static bool done = false;
+static bool is_json = false;
 
 static int wssk_init();
 static int io_loop(void);
@@ -61,12 +64,14 @@ static void on_iteration();
 static void check_idle_timeout();
 static bool timed_out_idle();
 static int skb_put_http_req(skb_t *buf, http_req_t *req);
+static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
 
 int
 main(int argc, char **argv)
 {
      int opt;
+     bool is_json_arg = false;
      int idle_timeout_arg = -1;
      int verbose_arg = 0;
      char *fwd_hostname_arg = "localhost";
@@ -100,6 +105,9 @@ main(int argc, char **argv)
           case 'P':
                sec_ws_proto_arg = optarg;
                break;
+          case 'j':
+               is_json_arg = true;
+               break;
           case 'h':
                print_help(argv[0]);
                exit(EXIT_SUCCESS);
@@ -117,6 +125,8 @@ main(int argc, char **argv)
 
      if (optind < argc)
           fwd_port_arg = argv[optind];
+
+     is_json = is_json_arg;
 
      wsd_cfg = malloc(sizeof(wsd_config_t));
      A(wsd_cfg);
@@ -511,12 +521,49 @@ stdin_decode_frame(sk_t *sk)
      wsframe_t wsf;
      memset(&wsf, 0, sizeof(wsframe_t));
 
-     wsf.payload_len = 32 < skb_rdsz(sk->recvbuf) ?
-          32 : skb_rdsz(sk->recvbuf);
+     if (is_json) {
+          wsf.payload_len = balanced_span(sk->recvbuf, '{', '}');
+          if (-1 == wsf.payload_len) {
+               wsd_errno = WSD_EINPUT;
+               return (-1);
+          }
+     } else {
+          wsf.payload_len = 32 < skb_rdsz(sk->recvbuf) ?
+               32 : skb_rdsz(sk->recvbuf);
+     }
+
      /* wsf.payload_len = skb_wrsz(wssk->sendbuf) < skb_rdsz(sk->recvbuf) ? */
      /*      skb_wrsz(wssk->sendbuf) : skb_rdsz(sk->recvbuf); */
 
      return wssk->proto->encode_frame(sk, &wsf);
+}
+
+int
+balanced_span(const skb_t *buf, const char begin, const char end)
+{
+     int num = -1;
+     unsigned int pos = buf->rdpos;
+     while (pos < buf->wrpos) {
+
+          if (0 == num)
+               return (pos - buf->rdpos);
+
+          if (begin == buf->data[pos]) {
+
+               if (-1 == num)
+                    num = 1;
+               else
+                    num++;
+
+          } else if (end == buf->data[pos]) {
+               num--;
+          }
+          
+          pos++;
+
+     }
+
+     return (-1);
 }
 
 void
@@ -622,14 +669,17 @@ void
 print_help(const char *bin)
 {
      printf("Usage: %s [OPTION]... [HOST [PORT]]\n", bin);
-     printf("Write to and read from remote system HOST via websocket protocol.\n\n");
-     printf(" -A, --user-agent\tset User-Agent string in HTTP upgrade request\n");
-     printf(" -V, --sec-ws-ver\tset Sec-WebSocket-Version string\n");
-     printf(" -P, --sec-ws-proto\tset Sec-WebSocket-Protocol string\n");
-     printf(" -K, --sec-ws-key\tset Sec-WebSocket-Key string\n");
-     printf(" -i, --idle-timeout\tidle read/write timeout in milliseconds\n");
-     printf(" -v, --verbose\tbe verbose (use multiple times for maximum effect)\n");
-     printf(" -h, --help\tdisplay this help and exit\n");
+     fputs("\
+Write to and read from remote system HOST via websocket protocol.\n\n\
+  -A, --user-agent    set User-Agent string in HTTP upgrade request\n\
+  -V, --sec-ws-ver    set Sec-WebSocket-Version string\n\
+  -P, --sec-ws-proto  set Sec-WebSocket-Protocol string\n\
+  -K, --sec-ws-key    set Sec-WebSocket-Key string\n\
+  -i, --idle-timeout  idle read/write timeout in milliseconds\n\
+  -j, --json          assume JSON-formatted input\n\
+  -v, --verbose       be verbose (use multiple times for maximum effect)\n\
+  -h, --help          display this help and exit\n\
+", stdout);
 }
 
 int
