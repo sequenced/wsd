@@ -11,11 +11,19 @@
  * See http://www.haproxy.org/download/1.8/doc/proxy-protocol.txt
  */
 
+#include <errno.h>
+#include <unistd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <string.h>
+#include <netdb.h>
+#include <sys/epoll.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #ifdef HAVE_ENDIAN_H
 #include <endian.h>
@@ -23,8 +31,6 @@
 /* TODO */
 #endif
 
-#include <sys/epoll.h>
-#include <arpa/inet.h>
 #include "common.h"
 #include "list.h"
 #include "hashtable.h"
@@ -39,7 +45,8 @@
 #define PP2_FAM_BITS(byte)      ((0xf0 & byte) >> 4)
 #define PP2_PROTO_BITS(byte)    (0xf & byte)
 
-extern sk_t *pp2_sk;
+sk_t *pp2sk = NULL;
+
 extern unsigned int wsd_errno;
 extern DECLARE_HASHTABLE(sk_hash, 4);
 extern const wsd_config_t *wsd_cfg;
@@ -50,7 +57,7 @@ static const uint8_t pp2_sig_ver_cmd_fam[] =
   0x21, 0x11 };                       /* version, command and family */
 static const uint8_t pp2_sig[] =
 { 0x0d, 0x0a, 0x0d, 0x0a, 0x00, 0x0d, 0x0a, 0x51, 0x55, 0x49, 0x54, 0x0a };
-     
+
 static void pp2_put_proxy_hdr_v2(skb_t *dst, const uint8_t *h);
 static void pp2_put_connhash(skb_t *dst, long unsigned int hash);
 static void pp2_put_payloadlen(skb_t *dst, unsigned int len);
@@ -67,6 +74,7 @@ int
 pp2_recv(sk_t *sk)
 {
      AN(skb_rdsz(sk->recvbuf));
+     AN(pp2sk);
 
      int rv, frames = 0;
      while (0 == (rv = sk->proto->decode_frame(sk)))
@@ -154,12 +162,12 @@ pp2_decode_frame(sk_t *sk)
 int
 pp2_encode_frame(sk_t *sk, wsframe_t *wsf)
 {
-     if ((wsf->payload_len + PP2_HEADER_LEN) > skb_wrsz(pp2_sk->sendbuf)) {
+     if ((wsf->payload_len + PP2_HEADER_LEN) > skb_wrsz(pp2sk->sendbuf)) {
           wsd_errno = WSD_EAGAIN;
           return (-1);
      }
 
-     pp2_encode_header(pp2_sk->sendbuf,
+     pp2_encode_header(pp2sk->sendbuf,
                        &sk->src_addr,
                        &sk->dst_addr,
                        sk->hash,
@@ -167,13 +175,13 @@ pp2_encode_frame(sk_t *sk, wsframe_t *wsf)
 
      if (LOG_VERBOSE <= wsd_cfg->verbose) {
           pp2_printf(stdout,
-                     &pp2_sk->sendbuf->data[pp2_sk->sendbuf->wrpos -
+                     &pp2sk->sendbuf->data[pp2sk->sendbuf->wrpos -
                                             PP2_HEADER_LEN]);
      }
 
      unsigned int len = wsf->payload_len;
      while (len--)
-          pp2_sk->sendbuf->data[pp2_sk->sendbuf->wrpos++] =
+          pp2sk->sendbuf->data[pp2sk->sendbuf->wrpos++] =
                sk->recvbuf->data[sk->recvbuf->rdpos++];
 
      skb_compact(sk->recvbuf);
@@ -274,4 +282,15 @@ pp2_printf(FILE *stream, char *p)
                        dst,
                        INET_ADDRSTRLEN),
              be16toh(addr->ipv4_addr.dst_port));
+}
+
+int
+pp2_close(sk_t *sk) {
+     AZ(close(sk->fd));
+     sock_destroy(sk);
+     free(sk);
+
+     pp2sk = NULL;
+
+     return 0;
 }

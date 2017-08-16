@@ -17,16 +17,12 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
-#ifdef WSD_DEBUG
-#include <stdio.h>
-#endif
-
 #include "common.h"
 #include "hashtable.h"
-#include "http.h"
-#include "ws.h"
-#include "pp2.h"
 #include "wschild.h"
+#include "http.h"
+#include "ws_wsd.h"
+#include "ws.h"
 
 #define MAX_EVENTS      256
 #define DEFAULT_TIMEOUT 128
@@ -36,7 +32,6 @@ struct timespec *ts_now = NULL;
 const wsd_config_t *wsd_cfg = NULL;
 int epfd = -1;
 unsigned int wsd_errno = WSD_CHECKERRNO;
-sk_t *pp2_sk = NULL;
 
 static bool done = false;
 static struct list_head *work_list = NULL;
@@ -45,7 +40,6 @@ static int io_loop();
 static void sigterm(int sig);
 static int sock_accept(int lfd);
 static int sock_close(sk_t *sk);
-static int pp2_sock_open();
 static int post_read(sk_t *sk);
 static unsigned long int hash(struct sockaddr_in *saddr);
 static void list_init(struct list_head **list);
@@ -78,8 +72,6 @@ wschild_main(const wsd_config_t *cfg)
      ev.events = EPOLLIN;
      ev.data.fd = wsd_cfg->lfd;
      AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, wsd_cfg->lfd, &ev));
-
-     pp2_sock_open();
 
      int rv = io_loop();
 
@@ -259,77 +251,6 @@ hash(struct sockaddr_in *saddr) {
      h <<= 16;
      h |= ((ts.tv_nsec &0x00000000ffff0000 >> 16));
      return h;
-}
-
-static int
-pp2_sock_open()
-{
-     AZ(pp2_sk);
-     pp2_sk = malloc(sizeof(sk_t));
-     if (!pp2_sk) {
-          wsd_errno = WSD_ENOMEM;
-          goto error;
-     }
-     memset(pp2_sk, 0, sizeof(sk_t));
-
-     int fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
-     if (0 > fd) {
-          wsd_errno = WSD_CHECKERRNO;
-          goto error;
-     }
-
-     struct addrinfo hints, *res;
-     memset(&hints, 0, sizeof(struct addrinfo));
-     hints.ai_family = AF_INET;
-     hints.ai_socktype = SOCK_STREAM;
-     hints.ai_flags = AI_NUMERICSERV;
-     int rv = getaddrinfo(wsd_cfg->fwd_hostname,
-                          wsd_cfg->fwd_port,
-                          &hints,
-                          &res);
-     if (0 > rv) {
-#ifdef WSD_DEBUG
-          printf("\tcannot resolve %s\n", gai_strerror(rv));
-#endif
-          goto error;
-     }
-     AZ(res->ai_next);
-     if (AF_INET != res->ai_family) {
-          wsd_errno = WSD_ENUM;
-          goto error;
-     }
-
-     rv = connect(fd, res->ai_addr, res->ai_addrlen);
-     freeaddrinfo(res);
-     if (0 > rv && EINPROGRESS != errno) {
-#ifdef WSD_DEBUG
-          printf("\tconnect: %s\n", strerror(errno));
-#endif
-
-          wsd_errno = WSD_EBADREQ;
-          goto error;
-     }
-
-     if (0 > sock_init(pp2_sk, fd, -1ULL))
-          goto error;
-
-     pp2_sk->ops->recv = pp2_recv;
-     pp2_sk->ops->close = sock_close;
-     pp2_sk->proto->decode_frame = pp2_decode_frame;
-     pp2_sk->proto->encode_frame = pp2_encode_frame;
-
-     AZ(register_for_events(pp2_sk));
-
-     return 0;
-
-error:
-     if (pp2_sk) {
-          sock_destroy(pp2_sk);
-          free(pp2_sk);
-          pp2_sk = NULL;
-     }
-
-     return (-1);
 }
 
 void

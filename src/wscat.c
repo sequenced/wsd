@@ -26,7 +26,7 @@ int epfd = -1;
 int wsd_errno = 0;
 wsd_config_t *wsd_cfg = NULL;
 struct timespec *ts_now = NULL;
-sk_t *pp2_sk = NULL; /* TODO avoid this reference */
+sk_t *pp2sk = NULL; /* TODO avoid this reference */
 
 static struct option long_opt[] = {
      {"sec-ws-ver",   required_argument, 0, 'V'},

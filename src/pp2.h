@@ -42,6 +42,8 @@ struct pp2_tlv {
      uint8_t value[0];
 } __attribute__((packed));
 
+int pp2_open();
+int pp2_close(sk_t *sk);
 int pp2_recv(sk_t *sk);
 int pp2_decode_frame(sk_t *sk);
 int pp2_encode_frame(sk_t *sk, wsframe_t *wsf);

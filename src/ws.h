@@ -35,10 +35,8 @@
 #define MASK_BIT(byte)        ((0x80 & byte) >> 7)
 #define PAYLOAD_LEN(byte)     (unsigned long int)(0x7f & byte)
 
-int ws_recv(sk_t *sk);
 int ws_decode_frame(sk_t *sk);
 int ws_encode_frame(sk_t *sk, wsframe_t *wsf);
-int ws_decode_handshake(sk_t *sk, http_req_t *req);
 long ws_calculate_frame_length(const unsigned long len);
 int ws_set_payload_len(skb_t *b, const unsigned long len, char byte2);
 int ws_start_closing_handshake(sk_t *sk, int status, bool do_mask);
