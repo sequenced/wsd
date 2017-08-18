@@ -42,6 +42,6 @@ int ws_set_payload_len(skb_t *b, const unsigned long len, char byte2);
 int ws_start_closing_handshake(sk_t *sk, int status, bool do_mask);
 int ws_finish_closing_handshake(sk_t *sk, bool do_mask);
 unsigned long int ws_decode_payload_len(skb_t *buf, const char byte2);
-void ws_print_frame_header(const wsframe_t *wsf, const char *prefix);
+void ws_printf(FILE *stream, const wsframe_t *wsf, const char *prefix);
 
 #endif /* #ifndef __WS_H__ */

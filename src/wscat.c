@@ -414,7 +414,7 @@ wssk_ws_encode_data_frame(skb_t *dst, skb_t *src, unsigned int maxlen)
      skb_compact(src);
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
-          ws_print_frame_header(&wsf, "TX");
+          ws_printf(stderr, &wsf, "TX");
 
      return 0;
 }
@@ -675,7 +675,7 @@ wssk_ws_decode_frame(sk_t *sk)
      }
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
-          ws_print_frame_header(&wsf, "RX");
+          ws_printf(stderr, &wsf, "RX");
 
      /* Protect against really large frames */
      if (wsf.payload_len > sizeof(sk->recvbuf->data)) {

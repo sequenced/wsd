@@ -77,6 +77,9 @@ ws_encode_frame(sk_t *sk, wsframe_t *wsf)
      skb_put(sk->sendbuf, wsf->byte1);
      AZ(ws_set_payload_len(sk->sendbuf, wsf->payload_len, 0));
 
+     if (LOG_VERBOSE <= wsd_cfg->verbose)
+          ws_printf(stderr, wsf, "TX");
+
      unsigned long k = wsf->payload_len;
      while (k--)
           sk->sendbuf->data[sk->sendbuf->wrpos++] =
@@ -141,14 +144,8 @@ ws_decode_frame(sk_t *sk)
      }
      skb_get(sk->recvbuf, wsf.masking_key);
 
-     if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          printf("0x%hhx|0x%hhx|opcode=0x%x|%hhu|payload len=%lu\n",
-                 wsf.byte1,
-                 wsf.byte2,
-                 OPCODE(wsf.byte1),
-                 MASK_BIT(wsf.byte2),
-                 wsf.payload_len);
-     }
+     if (LOG_VERBOSE <= wsd_cfg->verbose)
+          ws_printf(stderr, &wsf, "RX");
 
      /* TODO check that payload64 has left-most bit off */
 
@@ -302,7 +299,7 @@ encode_close_frame(skb_t *dst, int status, bool do_mask)
      }
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
-          ws_print_frame_header(&wsf, "TX");
+          ws_printf(stderr, &wsf, "TX");
 
      skb_put(dst, wsf.byte1);
      AZ(ws_set_payload_len(dst, wsf.payload_len, wsf.byte2));
@@ -382,9 +379,9 @@ ws_set_payload_len(skb_t *b, const unsigned long len, char byte2)
 }
 
 void
-ws_print_frame_header(const wsframe_t *wsf, const char *prefix)
+ws_printf(FILE *stream, const wsframe_t *wsf, const char *prefix)
 {
-     fprintf(stderr,
+     fprintf(stream,
              "%s:0x%hhx|0x%hhx|opcode=%hhu|maskbit=%hhu|payload_len=%lu\n",
              prefix,
              wsf->byte1,
