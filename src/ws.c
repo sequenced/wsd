@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <assert.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -300,6 +301,9 @@ encode_close_frame(skb_t *dst, int status, bool do_mask)
           wsf.masking_key = 0xcafebabe;
      }
 
+     if (LOG_VERBOSE <= wsd_cfg->verbose)
+          ws_print_frame_header(&wsf, "TX");
+
      skb_put(dst, wsf.byte1);
      AZ(ws_set_payload_len(dst, wsf.payload_len, wsf.byte2));
      if (do_mask) {
@@ -375,4 +379,17 @@ ws_set_payload_len(skb_t *b, const unsigned long len, char byte2)
      }
 
      return 0;
+}
+
+void
+ws_print_frame_header(const wsframe_t *wsf, const char *prefix)
+{
+     fprintf(stderr,
+             "%s:0x%hhx|0x%hhx|opcode=%hhu|maskbit=%hhu|payload_len=%lu\n",
+             prefix,
+             wsf->byte1,
+             wsf->byte2,
+             OPCODE(wsf->byte1),
+             MASK_BIT(wsf->byte2),
+             wsf->payload_len);
 }

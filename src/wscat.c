@@ -413,15 +413,8 @@ wssk_ws_encode_data_frame(skb_t *dst, skb_t *src, unsigned int maxlen)
 
      skb_compact(src);
 
-     if (LOG_VERBOSE <= wsd_cfg->verbose) {
-          fprintf(stderr,
-                  "TX:0x%hhx|0x%hhx|opcode=%hhu|maskbit=%hhu|payload_len=%lu\n",
-                  wsf.byte1,
-                  wsf.byte2,
-                  OPCODE(wsf.byte1),
-                  MASK_BIT(wsf.byte2),
-                  wsf.payload_len);
-     }
+     if (LOG_VERBOSE <= wsd_cfg->verbose)
+          ws_print_frame_header(&wsf, "TX");
 
      return 0;
 }
@@ -681,15 +674,8 @@ wssk_ws_decode_frame(sk_t *sk)
           return (-1);
      }
 
-     if (LOG_VERBOSE <= wsd_cfg->verbose) {
-          fprintf(stderr,
-                  "RX:0x%hhx|0x%hhx|opcode=%hhu|maskbit=%hhu|payload len=%lu\n",
-                  wsf.byte1,
-                  wsf.byte2,
-                  OPCODE(wsf.byte1),
-                  MASK_BIT(wsf.byte2),
-                  wsf.payload_len);
-     }
+     if (LOG_VERBOSE <= wsd_cfg->verbose)
+          ws_print_frame_header(&wsf, "RX");
 
      /* Protect against really large frames */
      if (wsf.payload_len > sizeof(sk->recvbuf->data)) {
