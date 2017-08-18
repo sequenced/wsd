@@ -24,35 +24,27 @@
 #include "ws_wsd.h"
 #include "ws.h"
 
-#define MAX_EVENTS      256
 #define DEFAULT_TIMEOUT 128
 
 DEFINE_HASHTABLE(sk_hash, 4);
-struct timespec *ts_now = NULL;
 const wsd_config_t *wsd_cfg = NULL;
 int epfd = -1;
 unsigned int wsd_errno = WSD_CHECKERRNO;
 
-static bool done = false;
 static struct list_head *work_list = NULL;
 
-static int io_loop();
 static void sigterm(int sig);
 static int sock_accept(int lfd);
 static int sock_close(sk_t *sk);
 static int post_read(sk_t *sk);
 static unsigned long int hash(struct sockaddr_in *saddr);
 static void list_init(struct list_head **list);
-static void on_iteration();
+static int on_iteration(const struct timespec *now);
 
 int
 wschild_main(const wsd_config_t *cfg)
 {
      wsd_cfg = cfg;
-
-     ts_now = malloc(sizeof(struct timespec));
-     A(ts_now);
-     memset(ts_now, 0, sizeof(struct timespec));
 
      list_init(&work_list);
      hash_init(sk_hash);
@@ -65,56 +57,35 @@ wschild_main(const wsd_config_t *cfg)
      epfd = epoll_create(1);
      A(epfd >= 0);
 
-     AZ(listen(wsd_cfg->lfd, 5));
+     sk_t *lsk = malloc(sizeof(sk_t));
+     if (!lsk) {
+          return (-1);
+     }
+     memset(lsk, 0, sizeof(sk_t));
+
+     if (0 > sock_init(lsk, wsd_cfg->lfd, 0ULL)) {
+          free(lsk);
+          return (-1);
+     }
      
-     struct epoll_event ev;
-     memset(&ev, 0x0, sizeof(ev));
-     ev.events = EPOLLIN;
-     ev.data.fd = wsd_cfg->lfd;
-     AZ(epoll_ctl(epfd, EPOLL_CTL_ADD, wsd_cfg->lfd, &ev));
+     lsk->events = EPOLLIN;
+     lsk->ops->accept = sock_accept;
+     lsk->ops->close = sock_close;
 
-     int rv = io_loop();
+     AZ(listen(lsk->fd, 4));
+     AZ(register_for_events(lsk));
 
-     free(ts_now);
+     int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
+
+     /* TODO Close open sockets */
+
+     AZ(close(epfd));
 
      return rv;
 }
 
 int
-io_loop()
-{
-     int rv = 0;
-     struct epoll_event evs[MAX_EVENTS];
-     memset(&evs, 0x0, sizeof(evs));
-
-     int timeout = DEFAULT_TIMEOUT;
-     while (!done) {
-
-          int nfd = epoll_wait(epfd, evs, MAX_EVENTS, timeout);
-          if (0 > nfd && EINTR == errno)
-               continue;
-          A(nfd >= 0);
-          A(nfd <= MAX_EVENTS);
-
-          int n;
-          for (n = 0; n < nfd; n++) {
-
-               if (evs[n].data.fd == wsd_cfg->lfd) {
-                    sock_accept(evs[n].data.fd);
-                    continue;
-               }
-
-               rv = on_epoll_event(&evs[n], post_read);
-          }
-
-          on_iteration();
-     }
-
-     return rv;
-}
-
-void
-on_iteration() {
+on_iteration(const struct timespec *now) {
      sk_t *pos = NULL, *k = NULL;
      list_for_each_entry_safe(pos, k, work_list, work_node) {
 
@@ -146,6 +117,8 @@ on_iteration() {
 
           }
      }
+
+     return 0;
 }
 
 int

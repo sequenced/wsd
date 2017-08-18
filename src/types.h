@@ -93,7 +93,7 @@ struct sk {
      struct proto      *proto;
      struct ops        *ops;
      unsigned char      close_on_write:1; /* close socket once sendbuf empty */
-     unsigned char      close:1;          /* close socket */
+     unsigned char      close:1;          /* close socket                    */
      unsigned char      closing:1;        /* closing handshake in progress   */
      struct timespec    ts_last_io;       /* records last I/O timestamp      */
      struct sockaddr_in src_addr;         /* source address iff socket       */
@@ -112,19 +112,19 @@ struct ops {
      int (*read)(sk_t *sk);     /* reads from socket                         */
      int (*write)(sk_t *sk);    /* writes to socket                          */
      int (*close)(sk_t *sk);    /* closes socket                             */
+     int (*accept)(int fd);     /* accepts socket                            */
 };
 
 typedef struct {
      uid_t       uid;
-     int         lfd;
+     int         lfd;          /* listening socket fd iff wsd                */
      int         port;
      char       *fwd_port;
      char       *fwd_hostname;
      const char *pidfilename;
      int         verbose;
-     int         no_fork;
-     int         idle_timeout; /* Set a fixed millisecond timeout for idle
-                                * connections. */
+     int         no_fork;      /* Does not fork, stays attached to terminal  */
+     int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
 } wsd_config_t;
 
 #endif /* #ifndef __TYPES_H__ */

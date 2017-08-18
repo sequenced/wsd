@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -7,10 +8,13 @@
 
 #include "common.h"
 
+#define MAX_EVENTS 256
+
 extern int epfd;
 extern int wsd_errno;
-extern struct timespec *ts_now;
 extern const wsd_config_t *wsd_cfg;
+
+bool done = false;
 
 static int sock_read(sk_t *sk);
 static int sock_write(sk_t *sk);
@@ -171,11 +175,12 @@ sock_destroy(sk_t *sk)
 }
 
 int
-on_epoll_event(struct epoll_event *evt, int (*post_read)(sk_t *sk))
+on_epoll_event(struct epoll_event *evt,
+               int (*post_read)(sk_t *sk),
+               const struct timespec *now)
 {
      int rv = 0;
      sk_t *sk = (sk_t*)evt->data.ptr;
-     AN(sk->hash);
      A(sk->fd >= 0);
 
      if (evt->events & EPOLLIN ||
@@ -185,6 +190,7 @@ on_epoll_event(struct epoll_event *evt, int (*post_read)(sk_t *sk))
           A(!sk->close);
 
           rv = sk->ops->read(sk);
+          ts_last_io_set(sk, now);
           if (0 > rv && wsd_errno != WSD_EAGAIN) {
                AZ(sk->ops->close(sk));
           } else {
@@ -201,6 +207,7 @@ on_epoll_event(struct epoll_event *evt, int (*post_read)(sk_t *sk))
      } else if (evt->events & EPOLLOUT) {
 
           rv = sk->ops->write(sk);
+          ts_last_io_set(sk, now);
           if (0 > rv && wsd_errno != WSD_EAGAIN) {
                AZ(sk->ops->close(sk));
           } else if (sk->close_on_write && 0 == skb_rdsz(sk->sendbuf)) {
@@ -239,8 +246,6 @@ sock_read(sk_t *sk)
      }
 
      A(0 < skb_wrsz(sk->recvbuf));
-
-     ts_last_io_set(sk, ts_now);
      int len = read(sk->fd,
                     &sk->recvbuf->data[sk->recvbuf->wrpos],
                     skb_wrsz(sk->recvbuf));
@@ -284,8 +289,6 @@ sock_write(sk_t *sk)
      }
 
      A(0 < skb_rdsz(sk->sendbuf));
-
-     ts_last_io_set(sk, ts_now);
      int len = write(sk->fd,
                      &sk->sendbuf->data[sk->sendbuf->rdpos],
                      skb_rdsz(sk->sendbuf));
@@ -360,5 +363,47 @@ skb_print(FILE *stream, skb_t *b, size_t n) {
      if (0 > (rv = fflush(stream)))
           wsd_errno = WSD_CHECKERRNO;
 
+     return rv;
+}
+
+int
+event_loop(int (*on_iteration)(const struct timespec *now),
+           int (*post_read)(sk_t *sk),
+           int timeout)
+{
+     int rv = 0;
+     struct epoll_event evs[MAX_EVENTS];
+     memset(&evs, 0, sizeof(evs));
+
+     struct timespec *now = malloc(sizeof(struct timespec));
+     AN(now);
+     memset(now, 0, sizeof(struct timespec));
+
+     while (!done) {
+          AZ(clock_gettime(CLOCK_MONOTONIC, now));
+          AZ((*on_iteration)(now));
+
+          int nfd = epoll_wait(epfd, evs, MAX_EVENTS, timeout);
+          if (0 > nfd && EINTR == errno)
+               continue;
+
+          A(nfd >= 0);
+          A(nfd <= MAX_EVENTS);
+
+          int n;
+          for (n = 0; n < nfd; n++) {
+
+               sk_t *sk = (sk_t*)evs[n].data.ptr;
+               if (sk->fd == wsd_cfg->lfd) {
+                    AZ(sk->ops->accept(sk->fd));
+                    continue;
+               }
+
+               rv = on_epoll_event(&evs[n], post_read, now);
+
+          }
+     }
+
+     free(now);
      return rv;
 }

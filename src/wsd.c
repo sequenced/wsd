@@ -1,8 +1,3 @@
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/stat.h>
-#include <netinet/in.h>
 #include <stdlib.h>
 #include <syslog.h>
 #include <stdio.h>
@@ -11,12 +6,19 @@
 #include <string.h>
 #include <fcntl.h>
 #include <pwd.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <netinet/in.h>
+
 #include "config.h"
 #include "wschild.h"
+#include "common.h"
 
 static const char *ident = "wsd";
 static int drop_priv(uid_t new_uid);
-static int sock_init(int port);
+static int listen_sock_bind(const int port);
 
 int
 main(int argc, char **argv)
@@ -25,13 +27,14 @@ main(int argc, char **argv)
      int pidfd;
      int port_arg = 6084;                 /* default */
      int no_fork_arg = 0;
+     int idle_timeout_arg = -1;
      int verbose_arg = 0;
      const char *fwd_port_arg = "6085";   /* default */
      const char *fwd_hostname_arg = NULL;
      const char *user_arg = NULL;
      const char *pidfile_arg = NULL;
 
-     while ((opt = getopt(argc, argv, "h:p:o:f:u:dv")) != -1) {
+     while ((opt = getopt(argc, argv, "h:p:o:f:u:i:dv")) != -1) {
           switch (opt) {
           case 'h':
                fwd_hostname_arg = optarg;
@@ -54,9 +57,12 @@ main(int argc, char **argv)
           case 'v':
                verbose_arg++;
                break;
+          case 'i':
+               idle_timeout_arg = atoi(optarg);
+               break;
           default:
                fprintf(stderr, "wsd: %s: unknown option\n", argv[0]);
-               exit(1);
+               exit(EXIT_FAILURE);
           }
      }
 
@@ -69,12 +75,12 @@ main(int argc, char **argv)
      struct passwd *pwent;
      if (NULL == (pwent = getpwnam(user_arg))) {
           fprintf(stderr, "%s: unknown user: %s\n", argv[0], user_arg);
-          exit(1);
+          exit(EXIT_FAILURE);
      }
 
      if (0 == pwent->pw_uid) {
           fprintf(stderr, "%s: daemon user can't be root\n", argv[0]);
-          exit(1);
+          exit(EXIT_FAILURE);
      }
 
      if (pidfile_arg) {
@@ -83,7 +89,7 @@ main(int argc, char **argv)
                        S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
           if (0 > pidfd) {
                fprintf(stderr, "%s: cannot open: %s\n", argv[0], pidfile_arg);
-               exit(1);
+               exit(EXIT_FAILURE);
           }
 
           AZ(fchown(pidfd, pwent->pw_uid, pwent->pw_gid));
@@ -102,6 +108,7 @@ main(int argc, char **argv)
      cfg.verbose = verbose_arg;
      cfg.no_fork = no_fork_arg;
      cfg.pidfilename = pidfile_arg;
+     cfg.idle_timeout = idle_timeout_arg;
 
      pid_t pid = 0;
      if (!cfg.no_fork) {
@@ -127,13 +134,13 @@ main(int argc, char **argv)
                                 (uintmax_t)getpid())) {
                     unlink(cfg.pidfilename);
                     perror("snprintf");
-                    exit(1);
+                    exit(EXIT_FAILURE);
                }
 
                if (0 > write(pidfd, pidstr, strlen(pidstr))) {
                     unlink(cfg.pidfilename);
                     perror("write");
-                    exit(1);
+                    exit(EXIT_FAILURE);
                }
 
                AZ(close(pidfd));
@@ -145,17 +152,23 @@ main(int argc, char **argv)
                close(STDERR_FILENO);
           }
 
-          ERREXIT(0 > (cfg.lfd = sock_init(cfg.port)), "sock_init");
+          cfg.lfd = listen_sock_bind(cfg.port);
+          if (0 > cfg.lfd) {
+               perror("listen_sock_bind");
+               exit(EXIT_FAILURE);
+          }
 
           if (0 == getuid()) {
                if (0 > drop_priv(cfg.uid)) {
                     AZ(close(cfg.lfd));
-                    exit(1);
+                    exit(EXIT_FAILURE);
                }
           }
 
           int rv = wschild_main(&cfg);
 
+          AZ(close(cfg.lfd));
+          
           syslog(LOG_INFO, "stopped");
           closelog();
 
@@ -165,10 +178,10 @@ main(int argc, char **argv)
           exit(rv);
      }
 
-     _exit(0);
+     _exit(EXIT_SUCCESS);
 
      /* not reached */
-     return 0;
+     return EXIT_SUCCESS;
 }
 
 static int
@@ -180,7 +193,7 @@ drop_priv(uid_t new_uid)
 }
 
 int
-sock_init(int port)
+listen_sock_bind(const int port)
 {
      int s;
 #ifdef SYS_LINUX

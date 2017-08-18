@@ -1,4 +1,3 @@
-#include <time.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -19,13 +18,13 @@
 #define skb_put_chunk(dst, src)                 \
      skb_put_strn(dst, src.p, src.len)
 
-#define MAX_EVENTS       256
 #define DEFAULT_TIMEOUT  128
+
+extern bool done;
 
 int epfd = -1;
 int wsd_errno = 0;
 wsd_config_t *wsd_cfg = NULL;
-struct timespec *ts_now = NULL;
 sk_t *pp2sk = NULL; /* TODO avoid this reference */
 
 static struct option long_opt[] = {
@@ -42,7 +41,6 @@ static struct option long_opt[] = {
 static const char *optstring = "V:P:K:A:i:vhj";
 static sk_t *fdin = NULL;
 static sk_t *wssk = NULL;
-static bool done = false;
 static bool is_json = false;
 
 static int wssk_init();
@@ -60,9 +58,10 @@ static int wssk_ws_start_closing_handshake();
 static int wssk_ws_encode_data_frame(skb_t *dst,
                                      skb_t *src,
                                      unsigned int maxlen);
-static void on_iteration();
-static void check_idle_timeout();
-static bool timed_out_idle();
+static int on_iteration(const struct timespec *now);
+static void check_idle_timeout(const struct timespec *now);
+static bool timed_out_idle(const struct timespec *now,
+                           const int timeout_in_millis);
 static int skb_put_http_req(skb_t *buf, http_req_t *req);
 static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
@@ -132,14 +131,11 @@ main(int argc, char **argv)
      A(wsd_cfg);
      memset(wsd_cfg, 0, sizeof(wsd_config_t));
 
-     ts_now = malloc(sizeof(struct timespec));
-     A(ts_now);
-     memset(ts_now, 0, sizeof(struct timespec));
-
      wsd_cfg->idle_timeout = idle_timeout_arg;
      wsd_cfg->fwd_hostname = fwd_hostname_arg;
      wsd_cfg->fwd_port = fwd_port_arg;
      wsd_cfg->verbose = verbose_arg;
+     wsd_cfg->lfd = -1;
 
      if (0 > wssk_init())
           exit(EXIT_FAILURE);
@@ -196,11 +192,10 @@ main(int argc, char **argv)
 
      turn_on_events(wssk, EPOLLOUT);
 
-     int rv = io_loop();
+     int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
 
      AZ(close(epfd));
 
-     free(ts_now);
      free(wsd_cfg);
 
      return rv;
@@ -275,35 +270,6 @@ wssk_init()
      AZ(register_for_events(wssk));
 
      return 0;
-}
-
-int
-io_loop()
-{
-     int rv = 0;
-     struct epoll_event evs[MAX_EVENTS];
-     memset(&evs, 0x0, sizeof(evs));
-
-     int timeout = DEFAULT_TIMEOUT;
-     while (!done) {
-          AZ(clock_gettime(CLOCK_MONOTONIC, ts_now));
-
-          on_iteration();
-
-          int nfd = epoll_wait(epfd, evs, MAX_EVENTS, timeout);
-          if (0 > nfd && EINTR == errno)
-               continue;
-
-          A(nfd >= 0);
-          A(nfd <= MAX_EVENTS);
-
-          int n;
-          for (n = 0; n < nfd; n++) {
-               rv = on_epoll_event(&evs[n], post_read);
-          }
-     }
-
-     return rv;
 }
 
 int
@@ -390,7 +356,7 @@ wssk_http_recv(sk_t *sk)
           exit(EXIT_FAILURE);
      }
      memset(fdin, 0, sizeof(sk_t));
-     sock_init(fdin, 0, -1ULL);
+     AZ(sock_init(fdin, 0, -1ULL));
      fdin->ops->recv = stdin_recv;
      fdin->ops->close = stdin_close;
      fdin->proto->decode_frame = stdin_decode_frame;
@@ -566,14 +532,16 @@ balanced_span(const skb_t *buf, const char begin, const char end)
      return (-1);
 }
 
-void
-on_iteration()
+int
+on_iteration(const struct timespec *now)
 {
-     check_idle_timeout();
+     check_idle_timeout(now);
+
+     return 0;
 }
 
 void
-check_idle_timeout()
+check_idle_timeout(const struct timespec *now)
 {
      if (-1 == wsd_cfg->idle_timeout)
           return;
@@ -587,7 +555,7 @@ check_idle_timeout()
      if (0 == wssk->ts_last_io.tv_sec && 0 == wssk->ts_last_io.tv_nsec)
           return;
 
-     if (timed_out_idle(wsd_cfg->idle_timeout))
+     if (timed_out_idle(now, wsd_cfg->idle_timeout))
           wssk_ws_start_closing_handshake();
 }
 
@@ -615,10 +583,10 @@ wssk_ws_start_closing_handshake()
 }
 
 bool
-timed_out_idle(int timeout_in_millis)
+timed_out_idle(const struct timespec *now, const int timeout_in_millis)
 {
-     time_t tv_sec_diff = ts_now->tv_sec - wssk->ts_last_io.tv_sec;
-     long tv_nsec_diff = ts_now->tv_nsec - wssk->ts_last_io.tv_nsec;
+     time_t tv_sec_diff = now->tv_sec - wssk->ts_last_io.tv_sec;
+     long tv_nsec_diff = now->tv_nsec - wssk->ts_last_io.tv_nsec;
 
      unsigned long int diff_in_millis = tv_sec_diff * 1000;
      diff_in_millis += (tv_nsec_diff / 1000000);
