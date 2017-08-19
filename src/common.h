@@ -1,6 +1,7 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#include <string.h>
 #include <sys/types.h>
 #include <sys/epoll.h>
 
@@ -21,6 +22,9 @@
      buf->rdpos -= amount;
 #define skb_rd_reset(buf, pos)                  \
      buf->rdpos = pos;
+#define skb_copy(dst, src, len)                                         \
+     memmove(&dst->data[dst->wrpos], &src->data[src->rdpos], len);      \
+     dst->wrpos += len;
 #define ts_last_io_set(dst, src)                \
      dst->ts_last_io.tv_sec = src->tv_sec;      \
      dst->ts_last_io.tv_nsec = src->tv_nsec;

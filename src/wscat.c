@@ -54,14 +54,18 @@ static struct option long_opt[] = {
      {"user-agent",   required_argument, 0, 'A'},
      {"idle-timeout", required_argument, 0, 'i'},
      {"json",         required_argument, 0, 'j'},
+     {"repeat-last",  required_argument, 0, 'R'},
      {"verbose",      no_argument,       0, 'v'},
      {"help",         no_argument,       0, 'h'},
      {0, 0, 0, 0}
 };
-static const char *optstring = "V:P:K:A:i:vhj";
+static const char *optstring = "V:P:K:A:i:R:vhj";
 static sk_t *fdin = NULL;
 static sk_t *wssk = NULL;
 static bool is_json = false;
+static int repeat_last_num = -1;
+static bool repeat_last_armed = false;
+static skb_t *last_input = NULL;
 
 static int wssk_init();
 static int io_loop(void);
@@ -78,6 +82,8 @@ static int wssk_ws_start_closing_handshake();
 static int wssk_ws_encode_data_frame(skb_t *dst,
                                      skb_t *src,
                                      unsigned int maxlen);
+static int repeat_last();
+static void try_repeating_last();
 static int on_iteration(const struct timespec *now);
 static void check_idle_timeout(const struct timespec *now);
 static bool timed_out_idle(const struct timespec *now,
@@ -91,6 +97,7 @@ main(int argc, char **argv)
 {
      int opt;
      bool is_json_arg = false;
+     int repeat_last_num_arg = -1;
      int idle_timeout_arg = -1;
      int verbose_arg = 0;
      char *fwd_hostname_arg = "localhost";
@@ -127,6 +134,9 @@ main(int argc, char **argv)
           case 'j':
                is_json_arg = true;
                break;
+          case 'R':
+               repeat_last_num_arg = atoi(optarg);
+               break;
           case 'h':
                print_help(argv[0]);
                exit(EXIT_SUCCESS);
@@ -146,6 +156,13 @@ main(int argc, char **argv)
           fwd_port_arg = argv[optind];
 
      is_json = is_json_arg;
+
+     if (0 < repeat_last_num_arg) {
+          last_input = malloc(sizeof(skb_t));
+          A(last_input);
+          memset(last_input, 0, sizeof(skb_t));
+          repeat_last_num = repeat_last_num_arg;
+     } 
 
      wsd_cfg = malloc(sizeof(wsd_config_t));
      A(wsd_cfg);
@@ -214,6 +231,9 @@ main(int argc, char **argv)
 
      int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
 
+     if (last_input)
+          free(last_input);
+     
      AZ(close(epfd));
 
      free(wsd_cfg);
@@ -273,7 +293,7 @@ wssk_init()
      }
      memset(wssk, 0, sizeof(sk_t));
 
-     if (0 > sock_init(wssk, fd, -1ULL)) {
+     if (0 > sock_init(wssk, fd, 0ULL)) {
           fprintf(stderr, "wscat: sock_init: 0x%x\n", wsd_errno);
           AZ(close(fd));
           return (-1);
@@ -307,9 +327,13 @@ wssk_close(sk_t *sk) {
 int
 stdin_close(sk_t *sk)
 {
-     if (-1 == wsd_cfg->idle_timeout)
+     if (-1 == wsd_cfg->idle_timeout && -1 == repeat_last_num)
           wssk_ws_start_closing_handshake();
-
+     else if (0 < repeat_last_num) {
+          repeat_last_armed = true;
+          repeat_last();
+     }
+     
      AZ(close(sk->fd));
      sock_destroy(sk);
      free(sk);
@@ -376,7 +400,7 @@ wssk_http_recv(sk_t *sk)
           exit(EXIT_FAILURE);
      }
      memset(fdin, 0, sizeof(sk_t));
-     AZ(sock_init(fdin, 0, -1ULL));
+     AZ(sock_init(fdin, 0, 0ULL));
      fdin->ops->recv = stdin_recv;
      fdin->ops->close = stdin_close;
      fdin->proto->decode_frame = stdin_decode_frame;
@@ -430,7 +454,7 @@ wssk_ws_encode_data_frame(skb_t *dst, skb_t *src, unsigned int maxlen)
      for (int i = 0; i < wsf.payload_len; i++)
           dst->data[dst->wrpos++] =
                mask(src->data[src->rdpos++], i, wsf.masking_key);
-
+     
      skb_compact(src);
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
@@ -511,6 +535,11 @@ stdin_decode_frame(sk_t *sk)
                32 : skb_rdsz(sk->recvbuf);
      }
 
+     if (0 < repeat_last_num) {
+          skb_reset(last_input);
+          skb_copy(last_input, sk->recvbuf, wsf.payload_len);
+     }
+
      /* wsf.payload_len = skb_wrsz(wssk->sendbuf) < skb_rdsz(sk->recvbuf) ? */
      /*      skb_wrsz(wssk->sendbuf) : skb_rdsz(sk->recvbuf); */
 
@@ -524,9 +553,6 @@ balanced_span(const skb_t *buf, const char begin, const char end)
      unsigned int pos = buf->rdpos;
      while (pos < buf->wrpos) {
 
-          if (0 == num)
-               return (pos - buf->rdpos);
-
           if (begin == buf->data[pos]) {
 
                if (-1 == num)
@@ -536,6 +562,10 @@ balanced_span(const skb_t *buf, const char begin, const char end)
 
           } else if (end == buf->data[pos]) {
                num--;
+
+               if (0 == num)
+                    return (pos - buf->rdpos + 1);
+
           }
           
           pos++;
@@ -549,8 +579,31 @@ int
 on_iteration(const struct timespec *now)
 {
      check_idle_timeout(now);
-
+     try_repeating_last();
+     
      return 0;
+}
+
+void
+try_repeating_last()
+{
+     if (!repeat_last_armed)
+          return;
+
+     if (NULL == wssk)
+          return;
+
+     if (wssk->closing)
+          return;
+     
+     int rv = 0;
+     if (0 < repeat_last_num) 
+          rv = repeat_last();
+
+     if (0 == repeat_last_num || (0 > rv && wsd_errno != WSD_EAGAIN)) {
+          wssk_ws_start_closing_handshake();
+          repeat_last_armed = false;
+     }
 }
 
 void
@@ -593,6 +646,48 @@ wssk_ws_start_closing_handshake()
      }
 
      return 0;
+}
+
+int
+repeat_last()
+{
+     if (0 == skb_rdsz(last_input)) {
+          /* Never sent anything, nothing to repeat. */
+          repeat_last_num = 0;
+          return 0;
+     }
+
+     sk_t *sk = malloc(sizeof(sk_t));
+     A(sk);
+     AZ(sock_init(sk, -1, 0ULL));
+
+     int rv = 0;
+     while (repeat_last_num) {
+
+          if (skb_wrsz(sk->recvbuf) < skb_rdsz(last_input)) {
+               wsd_errno = WSD_EAGAIN;
+               rv = -1;
+               break;
+          }
+
+          skb_copy(sk->recvbuf, last_input, skb_rdsz(last_input));
+          rv = stdin_decode_frame(sk);
+          if (0 == rv)
+               repeat_last_num--;
+
+          /* A serious problem, don't try repeating more frame(s). */
+          if (0 > rv && wsd_errno != WSD_EAGAIN)
+               repeat_last_num = 0;
+     }
+
+     sock_destroy(sk);
+     free(sk);
+
+     /* 
+      * Send remaining frame(s), if any, or start
+      * closing handshake when executing on_iteration().
+      */
+     return (0 == repeat_last_num ? 0 : rv);
 }
 
 bool
@@ -658,6 +753,7 @@ Write to and read from remote system HOST via websocket protocol.\n\n\
   -K, --sec-ws-key    set Sec-WebSocket-Key string\n\
   -i, --idle-timeout  idle read/write timeout in milliseconds\n\
   -j, --json          assume JSON-formatted input\n\
+  -R, --repeat-last   repeat last input as many times as specified\n\
   -v, --verbose       be verbose (use multiple times for maximum effect)\n\
   -h, --help          display this help and exit\n\
 ", stdout);
