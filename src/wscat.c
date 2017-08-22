@@ -596,14 +596,14 @@ try_repeating_last()
      if (wssk->closing)
           return;
      
-     int rv = 0;
      if (0 < repeat_last_num) 
-          rv = repeat_last();
+          repeat_last();
 
-     if (0 == repeat_last_num || (0 > rv && wsd_errno != WSD_EAGAIN)) {
-          wssk_ws_start_closing_handshake();
+     if (0 == repeat_last_num)
           repeat_last_armed = false;
-     }
+
+     if (0 == repeat_last_num && -1 == wsd_cfg->idle_timeout)
+          wssk_ws_start_closing_handshake();
 }
 
 void
@@ -628,10 +628,6 @@ check_idle_timeout(const struct timespec *now)
 int
 wssk_ws_start_closing_handshake()
 {
-     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s:\n", __FILE__, __LINE__, __func__);
-     }
-
      A(wssk);
      AZ(wssk->closing);
 
@@ -683,10 +679,6 @@ repeat_last()
      sock_destroy(sk);
      free(sk);
 
-     /* 
-      * Send remaining frame(s), if any, or start
-      * closing handshake when executing on_iteration().
-      */
      return (0 == repeat_last_num ? 0 : rv);
 }
 
