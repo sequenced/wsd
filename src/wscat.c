@@ -30,6 +30,7 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 
+#include "config.h"
 #include "ws.h"
 #include "types.h"
 #include "common.h"
@@ -55,14 +56,16 @@ static struct option long_opt[] = {
      {"idle-timeout", required_argument, 0, 'i'},
      {"json",         required_argument, 0, 'j'},
      {"repeat-last",  required_argument, 0, 'R'},
+     {"no-handshake", no_argument,       0, 'N'},
      {"verbose",      no_argument,       0, 'v'},
      {"help",         no_argument,       0, 'h'},
      {0, 0, 0, 0}
 };
-static const char *optstring = "V:P:K:A:i:R:vhj";
+static const char *optstring = "V:P:K:A:i:R:vhjN";
 static sk_t *fdin = NULL;
 static sk_t *wssk = NULL;
 static bool is_json = false;
+static bool no_handshake = false;
 static int repeat_last_num = -1;
 static bool repeat_last_armed = false;
 static skb_t *last_input = NULL;
@@ -78,16 +81,14 @@ static int stdin_decode_frame(sk_t *sk);
 static int wssk_ws_recv(sk_t *sk);
 static int wssk_ws_decode_frame(sk_t *sk);
 static int wssk_ws_encode_frame(sk_t *sk, wsframe_t *wsf);
-static int wssk_ws_start_closing_handshake();
+static void wssk_ws_start_closing_handshake();
 static int wssk_ws_encode_data_frame(skb_t *dst,
                                      skb_t *src,
-                                     unsigned int maxlen);
+                                     const unsigned int maxlen,
+                                     const uint64_t hash);
 static int repeat_last();
 static void try_repeating_last();
 static int on_iteration(const struct timespec *now);
-static void check_idle_timeout(const struct timespec *now);
-static bool timed_out_idle(const struct timespec *now,
-                           const int timeout_in_millis);
 static int skb_put_http_req(skb_t *buf, http_req_t *req);
 static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
@@ -97,6 +98,7 @@ main(int argc, char **argv)
 {
      int opt;
      bool is_json_arg = false;
+     bool no_handshake_arg = false;
      int repeat_last_num_arg = -1;
      int idle_timeout_arg = -1;
      int verbose_arg = 0;
@@ -134,6 +136,9 @@ main(int argc, char **argv)
           case 'j':
                is_json_arg = true;
                break;
+          case 'N':
+               no_handshake_arg = true;
+               break;
           case 'R':
                repeat_last_num_arg = atoi(optarg);
                break;
@@ -156,6 +161,7 @@ main(int argc, char **argv)
           fwd_port_arg = argv[optind];
 
      is_json = is_json_arg;
+     no_handshake = no_handshake_arg;
 
      if (0 < repeat_last_num_arg) {
           last_input = malloc(sizeof(skb_t));
@@ -303,6 +309,7 @@ wssk_init()
      wssk->ops->close = wssk_close;
      wssk->proto->decode_frame = wssk_ws_decode_frame;
      wssk->proto->encode_frame = wssk_ws_encode_frame;
+     wssk->proto->start_closing_handshake = ws_start_closing_handshake;
 
      epfd = epoll_create(1);
      A(epfd >= 0);
@@ -327,9 +334,10 @@ wssk_close(sk_t *sk) {
 int
 stdin_close(sk_t *sk)
 {
-     if (-1 == wsd_cfg->idle_timeout && -1 == repeat_last_num)
-          wssk_ws_start_closing_handshake();
-     else if (0 < repeat_last_num) {
+     if (-1 == wsd_cfg->idle_timeout && -1 == repeat_last_num) {
+          if (!no_handshake)
+               wssk_ws_start_closing_handshake();
+     } else if (0 < repeat_last_num) {
           repeat_last_armed = true;
           repeat_last();
      }
@@ -421,11 +429,15 @@ wssk_ws_encode_frame(sk_t *sk, wsframe_t *wsf)
 {
      return wssk_ws_encode_data_frame(wssk->sendbuf,
                                       sk->recvbuf,
-                                      wsf->payload_len);
+                                      wsf->payload_len,
+                                      wssk->hash);
 }
 
 int
-wssk_ws_encode_data_frame(skb_t *dst, skb_t *src, unsigned int maxlen)
+wssk_ws_encode_data_frame(skb_t *dst,
+                          skb_t *src,
+                          const unsigned int maxlen,
+                          const uint64_t hash)
 {
      wsframe_t wsf;
      memset(&wsf, 0, sizeof(wsframe_t));
@@ -458,7 +470,7 @@ wssk_ws_encode_data_frame(skb_t *dst, skb_t *src, unsigned int maxlen)
      skb_compact(src);
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
-          ws_printf(stderr, &wsf, "TX");
+          ws_printf(stderr, &wsf, "TX", hash);
 
      return 0;
 }
@@ -474,9 +486,11 @@ wssk_ws_recv(sk_t *sk)
      }
 
      if (frames) {
-          if (!(sk->events & EPOLLIN) && !sk->close_on_write) {
+          if (0 < skb_rdsz(sk->sendbuf) && !(sk->events & EPOLLOUT))
+               turn_on_events(sk, EPOLLOUT);
+
+          if (!(sk->events & EPOLLIN) && !sk->close_on_write)
                turn_on_events(sk, EPOLLIN);
-          }
      }
 
      if (sk->close || sk->close_on_write)
@@ -578,7 +592,11 @@ balanced_span(const skb_t *buf, const char begin, const char end)
 int
 on_iteration(const struct timespec *now)
 {
-     check_idle_timeout(now);
+     if (1 == check_idle_timeout(wssk, now, wsd_cfg->idle_timeout)) {
+          if (!no_handshake)
+               wssk_ws_start_closing_handshake();
+     }
+
      try_repeating_last();
      
      return 0;
@@ -602,46 +620,10 @@ try_repeating_last()
      if (0 == repeat_last_num)
           repeat_last_armed = false;
 
-     if (0 == repeat_last_num && -1 == wsd_cfg->idle_timeout)
-          wssk_ws_start_closing_handshake();
-}
-
-void
-check_idle_timeout(const struct timespec *now)
-{
-     if (-1 == wsd_cfg->idle_timeout)
-          return;
-
-     if (NULL == wssk)
-          return;
-
-     if (wssk->closing || wssk->close || wssk->close_on_write)
-          return;
-
-     if (0 == wssk->ts_last_io.tv_sec && 0 == wssk->ts_last_io.tv_nsec)
-          return;
-
-     if (timed_out_idle(now, wsd_cfg->idle_timeout))
-          wssk_ws_start_closing_handshake();
-}
-
-int
-wssk_ws_start_closing_handshake()
-{
-     A(wssk);
-     AZ(wssk->closing);
-
-     int rv = ws_start_closing_handshake(wssk, WS_1011, true);
-     if (0 > rv) {
-          done = true;
-          return (-1);
+     if (0 == repeat_last_num && -1 == wsd_cfg->idle_timeout) {
+          if (!no_handshake)
+               wssk_ws_start_closing_handshake();
      }
-
-     if (!(wssk->events & EPOLLOUT)) {
-          turn_on_events(wssk, EPOLLOUT);
-     }
-
-     return 0;
 }
 
 int
@@ -680,18 +662,6 @@ repeat_last()
      free(sk);
 
      return (0 == repeat_last_num ? 0 : rv);
-}
-
-bool
-timed_out_idle(const struct timespec *now, const int timeout_in_millis)
-{
-     time_t tv_sec_diff = now->tv_sec - wssk->ts_last_io.tv_sec;
-     long tv_nsec_diff = now->tv_nsec - wssk->ts_last_io.tv_nsec;
-
-     unsigned long int diff_in_millis = tv_sec_diff * 1000;
-     diff_in_millis += (tv_nsec_diff / 1000000);
-
-     return (diff_in_millis > timeout_in_millis ? true : false);
 }
 
 int
@@ -736,7 +706,7 @@ skb_put_http_req(skb_t *buf, http_req_t *req)
 void
 print_help(const char *bin)
 {
-     printf("Usage: %s [OPTION]... [HOST [PORT]]\n", bin);
+     printf("Usage: %s [OPTIONS]... [HOST [PORT]]\n", bin);
      fputs("\
 Write to and read from remote system HOST via websocket protocol.\n\n\
   -A, --user-agent    set User-Agent string in HTTP upgrade request\n\
@@ -746,9 +716,13 @@ Write to and read from remote system HOST via websocket protocol.\n\n\
   -i, --idle-timeout  idle read/write timeout in milliseconds\n\
   -j, --json          assume JSON-formatted input\n\
   -R, --repeat-last   repeat last input as many times as specified\n\
+  -N, --no-handshake  do not start or finish a closing handshake\n\
   -v, --verbose       be verbose (use multiple times for maximum effect)\n\
-  -h, --help          display this help and exit\n\
+  -h, --help          display this help and exit\n\n\
 ", stdout);
+     printf("Version %s - Please send bug reports to: %s\n",
+            PACKAGE_VERSION,
+            PACKAGE_BUGREPORT);
 }
 
 int
@@ -783,7 +757,7 @@ wssk_ws_decode_frame(sk_t *sk)
      }
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
-          ws_printf(stderr, &wsf, "RX");
+          ws_printf(stderr, &wsf, "RX", sk->hash);
 
      /* Protect against really large frames */
      if (wsf.payload_len > sizeof(sk->recvbuf->data)) {
@@ -798,6 +772,8 @@ wssk_ws_decode_frame(sk_t *sk)
           return (-1);
      }
 
+     A(wsf.payload_len <= skb_rdsz(sk->recvbuf));
+
      int rv = 0;
      switch (OPCODE(wsf.byte1)) {
      case WS_TEXT_FRAME:
@@ -807,7 +783,11 @@ wssk_ws_decode_frame(sk_t *sk)
           skb_compact(sk->recvbuf);
           break;
      case WS_CLOSE_FRAME:
-          rv = ws_finish_closing_handshake(sk, true);
+          if (no_handshake) {
+               skb_reset(sk->recvbuf);
+          } else {
+               rv = ws_finish_closing_handshake(sk, true, wsf.payload_len);
+          }
           break;
      case WS_PING_FRAME:
      case WS_PONG_FRAME:
@@ -817,4 +797,11 @@ wssk_ws_decode_frame(sk_t *sk)
      }
 
      return rv;
+}
+
+void
+wssk_ws_start_closing_handshake()
+{
+     if (0 > wssk->proto->start_closing_handshake(wssk, WS_1000, true))
+          done = true;
 }

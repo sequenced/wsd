@@ -27,6 +27,7 @@
 #include <sys/epoll.h>
 
 #include "common.h"
+#include "ws.h"
 
 #define MAX_EVENTS 256
 
@@ -42,15 +43,6 @@ static int sock_write(sk_t *sk);
 inline void
 turn_off_events(sk_t *sk, unsigned int events)
 {
-     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, events=0x%x\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 sk->fd,
-                 events);
-     }
-
      sk->events &= ~events;
 
      struct epoll_event ev;
@@ -63,15 +55,6 @@ turn_off_events(sk_t *sk, unsigned int events)
 inline void
 turn_on_events(sk_t *sk, unsigned int events)
 {
-     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, events=0x%x\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 sk->fd,
-                 events);
-     }
-
      sk->events |= events;
 
      struct epoll_event ev;
@@ -248,15 +231,6 @@ on_epoll_event(struct epoll_event *evt,
 int
 sock_read(sk_t *sk)
 {
-     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, wrsz=%d\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 sk->fd,
-                 skb_wrsz(sk->recvbuf));
-     }
-
      A(0 <= sk->fd);
 
      if (0 == skb_wrsz(sk->recvbuf)) {
@@ -283,9 +257,14 @@ sock_read(sk_t *sk)
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          printf("\t%s:%d: read %d byte(s)\n", __func__, __LINE__, len);
+          printf("%s:%d: %s: read %d byte(s) from %d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 len,
+                 sk->fd);
      }
-     
+
      sk->recvbuf->wrpos += len;
      return 0;
 }
@@ -293,15 +272,6 @@ sock_read(sk_t *sk)
 int
 sock_write(sk_t *sk)
 {
-     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          printf("%s:%d: %s: fd=%d, rdsz=%d\n",
-                 __FILE__,
-                 __LINE__,
-                 __func__,
-                 sk->fd,
-                 skb_rdsz(sk->sendbuf));
-     }
-
      if (0 == skb_rdsz(sk->sendbuf)) {
           turn_off_events(sk, EPOLLOUT);
           wsd_errno = WSD_EAGAIN;
@@ -319,7 +289,12 @@ sock_write(sk_t *sk)
      }
 
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
-          printf("\t%s:%d: wrote %d byte(s)\n", __func__, __LINE__, len);
+          printf("%s:%d: %s: wrote %d byte(s) to %d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 len,
+                 sk->fd);
      }
 
      sk->sendbuf->rdpos += len;
@@ -426,4 +401,37 @@ event_loop(int (*on_iteration)(const struct timespec *now),
 
      free(now);
      return rv;
+}
+
+int
+check_idle_timeout(const sk_t *sk,
+                   const struct timespec *now,
+                   const int timeout)
+{
+     AN(sk);
+
+     if (-1 == timeout)
+          return 0;
+
+     if (sk->closing || sk->close || sk->close_on_write)
+          return 0;
+
+     if (0 == sk->ts_last_io.tv_sec && 0 == sk->ts_last_io.tv_nsec)
+          return 0;
+
+     return has_timed_out(&sk->ts_last_io, now, timeout) ? 1 : 0;
+}
+
+bool
+has_timed_out(const struct timespec *instant,
+              const struct timespec *now,
+              const int timeout)
+{
+     time_t tv_sec_diff = now->tv_sec - instant->tv_sec;
+     long tv_nsec_diff = now->tv_nsec - instant->tv_nsec;
+
+     unsigned long int diff_in_millis = tv_sec_diff * 1000;
+     diff_in_millis += (tv_nsec_diff / 1000000);
+
+     return (diff_in_millis > timeout ? true : false);
 }

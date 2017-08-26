@@ -36,25 +36,32 @@
 #include "wschild.h"
 #include "common.h"
 
+#define DEFAULT_CLOSING_HANDSHAKE_TIMEOUT 8000   /* 8 seconds  */
+#define DEFAULT_IDLE_TIMEOUT              30000  /* 30 seconds */
+#define DEFAULT_FORWARD_PORT              "6085"
+#define DEFAULT_FORWARD_HOST              "127.0.0.1"
+#define DEFAULT_LISTENING_PORT            6084
+
 static const char *ident = "wsd";
 static int drop_priv(uid_t new_uid);
 static int listen_sock_bind(const int port);
+static void print_help();
 
 int
 main(int argc, char **argv)
 {
      int opt;
      int pidfd;
-     int port_arg = 6084;                 /* default */
+     int port_arg = DEFAULT_LISTENING_PORT;
      int no_fork_arg = 0;
-     int idle_timeout_arg = -1;
+     int idle_timeout_arg = DEFAULT_IDLE_TIMEOUT;
      int verbose_arg = 0;
-     const char *fwd_port_arg = "6085";   /* default */
+     const char *fwd_port_arg = DEFAULT_FORWARD_PORT;
      const char *fwd_hostname_arg = NULL;
      const char *user_arg = NULL;
      const char *pidfile_arg = NULL;
 
-     while ((opt = getopt(argc, argv, "h:p:o:f:u:i:dv")) != -1) {
+     while ((opt = getopt(argc, argv, "h:p:o:f:u:i:dv?")) != -1) {
           switch (opt) {
           case 'h':
                fwd_hostname_arg = optarg;
@@ -80,14 +87,21 @@ main(int argc, char **argv)
           case 'i':
                idle_timeout_arg = atoi(optarg);
                break;
+          case '?':
+               print_help(argv[0]);
+               exit(EXIT_SUCCESS);
+               break;
           default:
-               fprintf(stderr, "wsd: %s: unknown option\n", argv[0]);
+               fprintf(stderr,
+                       "%s: unknown option\nTry '%s -?' for more information.\n",
+                       optarg,
+                       argv[0]);
                exit(EXIT_FAILURE);
           }
      }
 
      if (NULL == fwd_hostname_arg)
-          fwd_hostname_arg = "127.0.0.1";
+          fwd_hostname_arg = DEFAULT_FORWARD_HOST;
 
      if (NULL == user_arg)
           user_arg = "wsd";
@@ -129,6 +143,7 @@ main(int argc, char **argv)
      cfg.no_fork = no_fork_arg;
      cfg.pidfilename = pidfile_arg;
      cfg.idle_timeout = idle_timeout_arg;
+     cfg.closing_handshake_timeout = DEFAULT_CLOSING_HANDSHAKE_TIMEOUT;
 
      pid_t pid = 0;
      if (!cfg.no_fork) {
@@ -239,4 +254,25 @@ listen_sock_bind(const int port)
      AZ(bind(s, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)));
 
      return s;
+}
+
+void
+print_help(const char *bin)
+{
+     printf("Usage: %s [OPTIONS]\n", bin);
+     fputs("\
+Terminate websockets and multiplex their frames to some backend.\n\n\
+  -h  multiplex to host, defaults to 127.0.0.1\n\
+  -f  multiplex to port, defaults to 6085\n\
+  -o  listen on port for incoming websocket connections, defaults to 6084\n\
+  -p  store process id in file\n\
+  -u  run daemon as user, defaults to wsd\n\
+  -d  do not fork and stay attached to terminal\n\
+  -i  idle read/write timeout in milliseconds, defaults to 30 seconds\n\
+  -v  be verbose (use multiple times for maximum effect)\n\
+  -?  display this help and exit\n\n\
+", stdout);
+     printf("Version %s - Please send bug reports to: %s\n",
+            PACKAGE_VERSION,
+            PACKAGE_BUGREPORT);
 }

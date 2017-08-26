@@ -1,4 +1,4 @@
-.TH wscat 8 "August 19th, 2017" 0.22
+.TH wscat 8 "August 27th, 2017" 0.22
 .SH NAME
 wscat \- write to and read from websocket
 .SH SYNOPSIS
@@ -29,6 +29,9 @@ The maximum time in milliseconds that you allow wscat to idle after a read from 
 .TP
 .IP "-j, --json"
 Assumes that input is formatted as JavaScript Object Notation (JSON). Each object is sent in a single frame.
+.TP
+.IP "-N, --no-handshake"
+Does not start or finish a closing handshake. Use this option to test only, it violates RFC 6455.
 .TP
 .IP "-R, --repeat-last"
 Repeats last input as many times as specified. The last input is the input that was entered immediately before standard input was closed.

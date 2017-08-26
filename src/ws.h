@@ -23,6 +23,7 @@
 #define WS_PROTO              "Sec-WebSocket-Protocol: "
 
 /* defined status codes, see RFC6455 section 7.4.1 */
+#define WS_1000 1000
 #define WS_1011 1011
 
 #define set_fin_bit(byte)     (byte |= 0x80)
@@ -39,9 +40,14 @@ int ws_decode_frame(sk_t *sk);
 int ws_encode_frame(sk_t *sk, wsframe_t *wsf);
 long ws_calculate_frame_length(const unsigned long len);
 int ws_set_payload_len(skb_t *b, const unsigned long len, char byte2);
-int ws_start_closing_handshake(sk_t *sk, int status, bool do_mask);
-int ws_finish_closing_handshake(sk_t *sk, bool do_mask);
+int ws_start_closing_handshake(sk_t *sk, const int status, const bool do_mask);
+int ws_finish_closing_handshake(sk_t *sk,
+                                const bool do_mask,
+                                const unsigned long int len);
 unsigned long int ws_decode_payload_len(skb_t *buf, const char byte2);
-void ws_printf(FILE *stream, const wsframe_t *wsf, const char *prefix);
+void ws_printf(FILE *stream,
+               const wsframe_t *wsf,
+               const char *prefix,
+               const uint64_t hash);
 
 #endif /* #ifndef __WS_H__ */

@@ -1,6 +1,7 @@
 #ifndef __TYPES_H__
 #define __TYPES_H__
 
+#include <stdbool.h>
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -88,36 +89,39 @@ struct sk {
      unsigned int       events;
      skb_t             *sendbuf;
      skb_t             *recvbuf;
-     struct hlist_node  hash_node;
-     struct list_head   work_node;
+     struct hlist_node  hash_node;       /* Hash table of every open socket  */
+     struct list_head   work_node;       /* List of work pending             */
+     struct list_head   sk_node;         /* List of every open socket        */
      struct proto      *proto;
      struct ops        *ops;
-     unsigned char      close_on_write:1; /* close socket once sendbuf empty */
-     unsigned char      close:1;          /* close socket                    */
-     unsigned char      closing:1;        /* closing handshake in progress   */
-     struct timespec    ts_last_io;       /* records last I/O timestamp      */
-     struct sockaddr_in src_addr;         /* source address iff socket       */
-     struct sockaddr_in dst_addr;         /* destination address iff socket  */
+     unsigned char      close_on_write:1;/* Close socket once sendbuf empty  */
+     unsigned char      close:1;         /* Close socket                     */
+     unsigned char      closing:1;       /* Closing handshake in progress    */
+     struct timespec    ts_last_io;      /* Records time of last I/O         */
+     struct timespec    ts_closing_handshake_start;
+     struct sockaddr_in src_addr;        /* Source address iff socket        */
+     struct sockaddr_in dst_addr;        /* Destination address iff socket   */
 };
 typedef struct sk sk_t;
 
 struct proto {
-     int (*decode_handshake)(sk_t *sk, http_req_t *req);
-     int (*decode_frame)(sk_t *sk);
-     int (*encode_frame)(sk_t *sk, wsframe_t *wsf);
+     int (*decode_handshake)(sk_t *sk, http_req_t *req); /* Decode handshake */
+     int (*decode_frame)(sk_t *sk);                 /* Decode single frame   */
+     int (*encode_frame)(sk_t *sk, wsframe_t *wsf); /* Encode single frame   */
+     int (*start_closing_handshake)(sk_t *sk, int status, bool mask);
 };
 
 struct ops {
-     int (*recv)(sk_t *sk);     /* passes execution to higher-level protocol */
-     int (*read)(sk_t *sk);     /* reads from socket                         */
-     int (*write)(sk_t *sk);    /* writes to socket                          */
-     int (*close)(sk_t *sk);    /* closes socket                             */
-     int (*accept)(int fd);     /* accepts socket                            */
+     int (*recv)(sk_t *sk);     /* Passes received data to protocol layer    */
+     int (*read)(sk_t *sk);     /* Reads from socket                         */
+     int (*write)(sk_t *sk);    /* Writes to socket                          */
+     int (*close)(sk_t *sk);    /* Closes socket                             */
+     int (*accept)(int fd);     /* Accepts socket                            */
 };
 
 typedef struct {
      uid_t       uid;
-     int         lfd;          /* listening socket fd iff wsd                */
+     int         lfd;          /* Listening socket fd iff wsd                */
      int         port;
      char       *fwd_port;
      char       *fwd_hostname;
@@ -125,6 +129,7 @@ typedef struct {
      int         verbose;
      int         no_fork;      /* Does not fork, stays attached to terminal  */
      int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
+     int         closing_handshake_timeout;
 } wsd_config_t;
 
 #endif /* #ifndef __TYPES_H__ */

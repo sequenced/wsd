@@ -78,13 +78,11 @@ ws_recv(sk_t *sk)
           frames++;
 
      if (frames) {
-          if (!(pp2sk->events & EPOLLOUT)) {
+          if (0 < skb_rdsz(pp2sk->sendbuf) && !(pp2sk->events & EPOLLOUT))
                turn_on_events(pp2sk, EPOLLOUT);
-          }
 
-          if (!(sk->events & EPOLLIN) && sk->close_on_write) {
+          if (!(sk->events & EPOLLIN) && sk->close_on_write)
                turn_on_events(sk, EPOLLIN);
-          }
      }
 
      if (sk->close || sk->close_on_write)
@@ -136,6 +134,7 @@ ws_decode_handshake(sk_t *sk, http_req_t *req)
      /* "switch" into websocket mode */
      sk->proto->decode_frame = ws_decode_frame;
      sk->proto->encode_frame = ws_encode_frame;
+     sk->proto->start_closing_handshake = ws_start_closing_handshake;
      sk->ops->recv = ws_recv;
 
      AZ(skb_rdsz(sk->recvbuf));

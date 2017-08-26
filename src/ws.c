@@ -56,7 +56,10 @@ extern const wsd_config_t *wsd_cfg;
 static int dispatch_payload(sk_t *sk, wsframe_t *wsf);
 static int encode_ping_frame(sk_t *sk, wsframe_t *wsf);
 static int encode_pong_frame(sk_t *sk, wsframe_t *wsf);
-static int encode_close_frame(skb_t *b, int status, bool do_mask);
+static int encode_close_frame(skb_t *b,
+                              const int status,
+                              const bool do_mask,
+                              const uint64_t hash);
 
 int
 ws_encode_frame(sk_t *sk, wsframe_t *wsf)
@@ -98,7 +101,7 @@ ws_encode_frame(sk_t *sk, wsframe_t *wsf)
      AZ(ws_set_payload_len(sk->sendbuf, wsf->payload_len, 0));
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
-          ws_printf(stderr, wsf, "TX");
+          ws_printf(stderr, wsf, "TX", sk->hash);
 
      unsigned long k = wsf->payload_len;
      while (k--)
@@ -130,7 +133,7 @@ ws_decode_frame(sk_t *sk)
      }
 
      if (skb_rdsz(sk->recvbuf) < WS_MASKED_FRAME_LEN) {
-          /* need WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2 */
+          /* need WS_MASKED_FRAME_LEN bytes; see RFC6455 section 5.2. */
           wsd_errno = WSD_EINPUT;
           return (-1);
      }
@@ -165,7 +168,7 @@ ws_decode_frame(sk_t *sk)
      skb_get(sk->recvbuf, wsf.masking_key);
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
-          ws_printf(stderr, &wsf, "RX");
+          ws_printf(stderr, &wsf, "RX", sk->hash);
 
      /* TODO check that payload64 has left-most bit off */
 
@@ -196,7 +199,7 @@ dispatch_payload(sk_t *sk, wsframe_t *wsf)
           rv = pp2sk->proto->encode_frame(sk, wsf);
           break;
      case WS_CLOSE_FRAME:
-          rv = ws_finish_closing_handshake(sk, false);
+          rv = ws_finish_closing_handshake(sk, false, wsf->payload_len);
           break;
      case WS_PING_FRAME:
           rv = encode_ping_frame(sk, wsf);
@@ -213,7 +216,7 @@ dispatch_payload(sk_t *sk, wsframe_t *wsf)
                       OPCODE(wsf->byte1));
           }
 
-          rv = ws_start_closing_handshake(sk, WS_1011, false);
+          rv = sk->proto->start_closing_handshake(sk, WS_1011, false);
      }
 
      return rv;
@@ -252,14 +255,10 @@ ws_decode_payload_len(skb_t *buf, const char byte2)
 }
 
 int
-ws_finish_closing_handshake(sk_t *sk, bool do_mask)
+ws_finish_closing_handshake(sk_t *sk,
+                            const bool do_mask,
+                            const unsigned long int len)
 {
-     unsigned short status = 0;
-     if (WS_FRAME_STATUS_LEN <= skb_wrsz(sk->sendbuf)) {
-          skb_get(sk->recvbuf, status);
-          status = be16toh(status);
-     }
-
      /* Closing handshake completed (reply to our earlier close frame) */
      if (sk->closing) {
           skb_reset(sk->recvbuf);
@@ -268,14 +267,21 @@ ws_finish_closing_handshake(sk_t *sk, bool do_mask)
           return 0;
      }
 
+     unsigned short status = 0; /* Not used, see RFC6455 section 7.4.2. */ 
+     if (WS_FRAME_STATUS_LEN <= len &&
+         WS_FRAME_STATUS_LEN <= skb_wrsz(sk->sendbuf)) {
+          skb_get(sk->recvbuf, status);
+          status = be16toh(status);
+     }
+
      int rv;
-     rv = encode_close_frame(sk->sendbuf, status, do_mask);
+     rv = encode_close_frame(sk->sendbuf, status, do_mask, sk->hash);
      if (0 == rv) {
           sk->close_on_write = 1;
           sk->closing = 1;
      }
 
-     /* don't process data after close frame, see RFC6455 section 5.5.1 */
+     /* Don't process data after close frame, see RFC6455 section 5.5.1. */
      skb_reset(sk->recvbuf);
 
      return rv;
@@ -296,11 +302,14 @@ encode_pong_frame(sk_t *sk, wsframe_t *ignored)
 }
 
 int
-encode_close_frame(skb_t *dst, int status, bool do_mask)
+encode_close_frame(skb_t *dst,
+                   const int status,
+                   const bool do_mask,
+                   const uint64_t hash)
 {
      unsigned int frame_len = do_mask ?
           WS_MASKED_FRAME_LEN : WS_UNMASKED_FRAME_LEN;
-     frame_len += (0 < status ? 2 : 0); /* See section 5.5.1 RFC6455 */
+     frame_len += (0 < status ? 2 : 0); /* See section 5.5.1. RFC6455 */
      
      if (frame_len > skb_wrsz(dst)) {
           wsd_errno = WSD_ENOMEM;
@@ -319,7 +328,7 @@ encode_close_frame(skb_t *dst, int status, bool do_mask)
      }
 
      if (LOG_VERBOSE <= wsd_cfg->verbose)
-          ws_printf(stderr, &wsf, "TX");
+          ws_printf(stderr, &wsf, "TX", hash);
 
      skb_put(dst, wsf.byte1);
      AZ(ws_set_payload_len(dst, wsf.payload_len, wsf.byte2));
@@ -340,13 +349,17 @@ encode_close_frame(skb_t *dst, int status, bool do_mask)
 }
 
 int
-ws_start_closing_handshake(sk_t *sk, int status, bool do_mask)
+ws_start_closing_handshake(sk_t *sk, const int status, const bool do_mask)
 {
      AZ(sk->closing);
      
-     int rv = encode_close_frame(sk->sendbuf, status, do_mask);
-     if (0 == rv)
+     int rv = encode_close_frame(sk->sendbuf, status, do_mask, sk->hash);
+     if (0 == rv) {
           sk->closing = 1;
+
+          if (!(sk->events & EPOLLOUT))
+               turn_on_events(sk, EPOLLOUT);
+     }
 
      return rv;
 }
@@ -399,11 +412,15 @@ ws_set_payload_len(skb_t *b, const unsigned long len, char byte2)
 }
 
 void
-ws_printf(FILE *stream, const wsframe_t *wsf, const char *prefix)
+ws_printf(FILE *stream,
+          const wsframe_t *wsf,
+          const char *prefix,
+          const uint64_t hash)
 {
      fprintf(stream,
-             "%s:0x%hhx|0x%hhx|opcode=%hhu|maskbit=%hhu|payload_len=%lu\n",
+             "%s:0x%lx|0x%hhx|0x%hhx|opcode=%hhu|maskbit=%hhu|payload_len=%lu\n",
              prefix,
+             hash,
              wsf->byte1,
              wsf->byte2,
              OPCODE(wsf->byte1),

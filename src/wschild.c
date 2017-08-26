@@ -52,6 +52,7 @@ int epfd = -1;
 unsigned int wsd_errno = WSD_CHECKERRNO;
 
 static struct list_head *work_list = NULL;
+static struct list_head *sk_list = NULL;
 
 static void sigterm(int sig);
 static int sock_accept(int lfd);
@@ -60,6 +61,11 @@ static int post_read(sk_t *sk);
 static unsigned long int hash(struct sockaddr_in *saddr);
 static void list_init(struct list_head **list);
 static int on_iteration(const struct timespec *now);
+static void check_timeouts_for_each(const struct timespec *now);
+static void try_recv();
+static int check_closing_handshake_timeout(const sk_t *sk,
+                                           const struct timespec *now,
+                                           const int timeout);
 
 int
 wschild_main(const wsd_config_t *cfg)
@@ -67,6 +73,7 @@ wschild_main(const wsd_config_t *cfg)
      wsd_cfg = cfg;
 
      list_init(&work_list);
+     list_init(&sk_list);
      hash_init(sk_hash);
 
      struct sigaction sac;
@@ -106,9 +113,73 @@ wschild_main(const wsd_config_t *cfg)
 
 int
 on_iteration(const struct timespec *now) {
+     try_recv();
+     check_timeouts_for_each(now);
+     return 0;
+}
+
+void
+check_timeouts_for_each(const struct timespec *now)
+{
+     sk_t *pos = NULL, *k = NULL;
+     list_for_each_entry_safe(pos, k, sk_list, sk_node) {
+
+          int rv = check_idle_timeout(pos, now, wsd_cfg->idle_timeout);
+
+          if (1 == rv) {
+
+               if (0 > pos->proto->start_closing_handshake(pos,
+                                                           WS_1000,
+                                                           false)) {
+
+                    /* Failed to start closing handshake, close socket now */
+                    AZ(pos->ops->close(pos));
+
+               } else {
+                    
+                    /* Started closing handshake, arm timeout. */
+                    pos->ts_closing_handshake_start.tv_sec = now->tv_sec;
+                    pos->ts_closing_handshake_start.tv_nsec = now->tv_nsec;
+
+               }
+          }
+
+          rv = check_closing_handshake_timeout(pos,
+                                               now,
+                                               wsd_cfg->closing_handshake_timeout);
+          if (1 == rv) {
+
+               /* 
+                * Closing handshake did not complete
+                * in time, close socket now.
+                */
+               AZ(pos->ops->close(pos));
+
+          }
+     }
+}
+
+int
+check_closing_handshake_timeout(const sk_t *sk,
+                                const struct timespec *now,
+                                const int timeout)
+{
+     A(0 < timeout);
+     AN(sk);
+
+     if (!sk->closing)
+          return 0;
+     
+     return has_timed_out(&sk->ts_closing_handshake_start,
+                          now,
+                          timeout) ? 1 : 0;
+}
+
+void
+try_recv()
+{
      sk_t *pos = NULL, *k = NULL;
      list_for_each_entry_safe(pos, k, work_list, work_node) {
-
           int rv = pos->ops->recv(pos);
           if (0 == rv) {
 
@@ -134,17 +205,26 @@ on_iteration(const struct timespec *now) {
                if (!pos->close_on_write) {
                     AZ(pos->ops->close(pos));
                }
-
           }
      }
-
-     return 0;
 }
 
 int
 sock_close(sk_t *sk)
 {
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: hash=0x%lx, rdsz=%d, wrsz=%d, fd=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 sk->hash,
+                 skb_rdsz(sk->sendbuf),
+                 skb_wrsz(sk->recvbuf),
+                 sk->fd);
+     }
+
      hash_del(&sk->hash_node);
+     list_del(&sk->sk_node);
 
      sk_t *pos = NULL, *k = NULL;
      list_for_each_entry_safe(pos, k, work_list, work_node) {
@@ -228,6 +308,17 @@ sock_accept(int lfd)
      }
 
      hash_add(sk_hash, &sk->hash_node, sk->hash);
+     list_add_tail(&sk->sk_node, sk_list);
+
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: hash=0x%lx, rdsz=%d, wrsz=%d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 sk->hash,
+                 skb_rdsz(sk->sendbuf),
+                 skb_wrsz(sk->recvbuf));
+     }
 
      return 0;
 }

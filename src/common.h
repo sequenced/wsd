@@ -20,6 +20,8 @@
      buf->rdpos = 0;
 #define skb_rd_rewind(buf, amount)              \
      buf->rdpos -= amount;
+#define skb_rd_forward(buf, amount)             \
+     buf->rdpos += amount;
 #define skb_rd_reset(buf, pos)                  \
      buf->rdpos = pos;
 #define skb_copy(dst, src, len)                                         \
@@ -48,5 +50,11 @@ char mask(char c, unsigned int i, unsigned int key);
 int event_loop(int (*on_iteration)(const struct timespec *now),
                int (*post_read)(sk_t *sk),
                int timeout);
+int check_idle_timeout(const sk_t *sk,
+                        const struct timespec *now,
+                        const int timeout);
+bool has_timed_out(const struct timespec *instant,
+                   const struct timespec *now,
+                   const int timeout);
 
 #endif /* #ifndef __COMMON_H__ */
