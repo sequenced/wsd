@@ -1,12 +1,16 @@
 #ifndef __TYPES_H__
 #define __TYPES_H__
 
+#include "config.h"
 #include <stdbool.h>
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#ifdef HAVE_OPENSSL_SHA_H
+#include <openssl/ssl.h>
+#endif
 #include "list.h"
 
 #define ALERT(func, file, line)                 \
@@ -101,6 +105,10 @@ struct sk {
      struct timespec    ts_closing_handshake_start;
      struct sockaddr_in src_addr;        /* Source address iff socket        */
      struct sockaddr_in dst_addr;        /* Destination address iff socket   */
+#ifdef HAVE_OPENSSL_SHA_H
+     SSL_CTX           *sslctx;
+     SSL               *ssl;
+#endif
 };
 typedef struct sk sk_t;
 
@@ -130,6 +138,13 @@ typedef struct {
      int         no_fork;      /* Does not fork, stays attached to terminal  */
      int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
      int         closing_handshake_timeout;
+     char       *user_agent;
+     char       *sec_ws_proto;
+     char       *sec_ws_ver;
+     char       *sec_ws_key;
+#ifdef HAVE_OPENSSL_SHA_H
+     bool        tls;          /* TLS requested                              */
+#endif
 } wsd_config_t;
 
 #endif /* #ifndef __TYPES_H__ */

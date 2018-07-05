@@ -18,6 +18,7 @@
  *
  */
 
+#include "config.h"
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -29,8 +30,10 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
-
-#include "config.h"
+#ifdef HAVE_OPENSSL_SHA_H
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
 #include "ws.h"
 #include "types.h"
 #include "common.h"
@@ -89,10 +92,16 @@ static int wssk_ws_encode_data_frame(skb_t *dst,
 static int repeat_last();
 static void try_repeating_last();
 static int on_iteration(const struct timespec *now);
+static int create_http_req(sk_t *sk);
 static int skb_put_http_req(skb_t *buf, http_req_t *req);
 static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
-
+#ifdef HAVE_OPENSSL_SHA_H
+static int sock_tls_init(sk_t *sk, const char *hostname);
+static int sock_tls_read(sk_t *sk);
+static int sock_tls_write(sk_t *sk);
+static int start_tls_handshake(sk_t *sk);
+#endif
 int
 main(int argc, char **argv)
 {
@@ -179,11 +188,42 @@ main(int argc, char **argv)
      wsd_cfg->fwd_port = fwd_port_arg;
      wsd_cfg->verbose = verbose_arg;
      wsd_cfg->lfd = -1;
+     wsd_cfg->user_agent = user_agent_arg;
+     wsd_cfg->sec_ws_proto = sec_ws_proto_arg;
+     wsd_cfg->sec_ws_ver = sec_ws_ver_arg;
+     wsd_cfg->sec_ws_key = sec_ws_key_arg;
+#ifdef HAVE_OPENSSL_SHA_H
+     wsd_cfg->tls = true; // TODO Set from command line
+#endif
 
      if (0 > wssk_init())
           exit(EXIT_FAILURE);
 
-     /* Kick off handshake with HTTP upgrade request. */
+#ifdef HAVE_OPENSSL_SHA_H
+     if (wsd_cfg->tls)
+          start_tls_handshake(wssk);
+     else
+#endif
+          if (0 > create_http_req(wssk))
+               exit(EXIT_FAILURE);
+     
+     turn_on_events(wssk, EPOLLOUT);
+
+     int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
+
+     if (last_input)
+          free(last_input);
+     
+     AZ(close(epfd));
+
+     free(wsd_cfg);
+
+     return rv;
+}
+
+int
+create_http_req(sk_t *sk)
+{
      http_req_t req;
      memset(&req, 0, sizeof(http_req_t));
 
@@ -207,44 +247,33 @@ main(int argc, char **argv)
      strcpy(req.origin.p, wsd_cfg->fwd_hostname);
      req.origin.len = strlen(wsd_cfg->fwd_hostname);
 
-     if (sec_ws_proto_arg) {
-          A(req.sec_ws_proto.p = malloc(strlen(sec_ws_proto_arg) + 1));
-          strcpy(req.sec_ws_proto.p, sec_ws_proto_arg);
-          req.sec_ws_proto.len = strlen(sec_ws_proto_arg);
+     if (wsd_cfg->sec_ws_proto) {
+          A(req.sec_ws_proto.p = malloc(strlen(wsd_cfg->sec_ws_proto) + 1));
+          strcpy(req.sec_ws_proto.p, wsd_cfg->sec_ws_proto);
+          req.sec_ws_proto.len = strlen(wsd_cfg->sec_ws_proto);
      }
 
-     A(req.sec_ws_key.p = malloc(strlen(sec_ws_key_arg) + 1));
-     strcpy(req.sec_ws_key.p, sec_ws_key_arg);
-     req.sec_ws_key.len = strlen(sec_ws_key_arg);
+     A(req.sec_ws_key.p = malloc(strlen(wsd_cfg->sec_ws_key) + 1));
+     strcpy(req.sec_ws_key.p, wsd_cfg->sec_ws_key);
+     req.sec_ws_key.len = strlen(wsd_cfg->sec_ws_key);
 
-     A(req.sec_ws_ver.p = malloc(strlen(sec_ws_ver_arg) + 1));
-     strcpy(req.sec_ws_ver.p, sec_ws_ver_arg);
-     req.sec_ws_ver.len = strlen(sec_ws_ver_arg);
+     A(req.sec_ws_ver.p = malloc(strlen(wsd_cfg->sec_ws_ver) + 1));
+     strcpy(req.sec_ws_ver.p, wsd_cfg->sec_ws_ver);
+     req.sec_ws_ver.len = strlen(wsd_cfg->sec_ws_ver);
 
-     A(req.user_agent.p = malloc(strlen(user_agent_arg) + 1));
-     strcpy(req.user_agent.p, user_agent_arg);
-     req.user_agent.len = strlen(user_agent_arg);
+     A(req.user_agent.p = malloc(strlen(wsd_cfg->user_agent) + 1));
+     strcpy(req.user_agent.p, wsd_cfg->user_agent);
+     req.user_agent.len = strlen(wsd_cfg->user_agent);
      
-     AZ(skb_put_http_req(wssk->sendbuf, &req));
+     AZ(skb_put_http_req(sk->sendbuf, &req));
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          unsigned int len = skb_rdsz(wssk->sendbuf);
-          skb_print(stdout, wssk->sendbuf, len);
-          skb_rd_rewind(wssk->sendbuf, len);
+          unsigned int len = skb_rdsz(sk->sendbuf);
+          skb_print(stdout, sk->sendbuf, len);
+          skb_rd_rewind(sk->sendbuf, len);
      }
 
-     turn_on_events(wssk, EPOLLOUT);
-
-     int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
-
-     if (last_input)
-          free(last_input);
-     
-     AZ(close(epfd));
-
-     free(wsd_cfg);
-
-     return rv;
+     return 0;
 }
 
 int
@@ -304,6 +333,14 @@ wssk_init()
           AZ(close(fd));
           return (-1);
      }
+
+#ifdef HAVE_OPENSSL_SHA_H
+     if (wsd_cfg->tls && 0 > sock_tls_init(wssk, wsd_cfg->fwd_hostname)) {
+          fprintf(stderr, "wscat: sock_tls_init");
+          AZ(close(fd));
+          return (-1);
+     }
+#endif
 
      wssk->ops->recv = wssk_http_recv;
      wssk->ops->close = wssk_close;
@@ -805,3 +842,84 @@ wssk_ws_start_closing_handshake()
      if (0 > wssk->proto->start_closing_handshake(wssk, WS_1000, true))
           done = true;
 }
+
+#ifdef HAVE_OPENSSL_SHA_H
+int
+sock_tls_init(sk_t *sk, const char *hostname)
+{
+     if (!(sk->sslctx = SSL_CTX_new(TLS_client_method()))) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     if (!SSL_CTX_set_min_proto_version(sk->sslctx, TLS1_VERSION)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     SSL_CTX_set_options(sk->sslctx, SSL_OP_ALL | SSL_OP_SINGLE_DH_USE);
+     if (!SSL_CTX_set_default_verify_paths(sk->sslctx)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     // TODO Could set cipher list here
+
+     // TODO Verify cert
+     SSL_CTX_set_verify(sk->sslctx, SSL_VERIFY_NONE, NULL);
+
+     if (!(sk->ssl = SSL_new(sk->sslctx))) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+     SSL_set_connect_state(sk->ssl);
+     if (0 >= SSL_set1_host(sk->ssl, hostname)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     if (!SSL_set_fd(sk->ssl, sk->fd)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     sk->ops->read = sock_tls_read;
+     sk->ops->write = sock_tls_write;
+     
+     return 0;
+}
+
+int
+sock_tls_read(sk_t *sk)
+{
+     turn_off_events(sk, EPOLLIN);
+     return start_tls_handshake(sk);
+}
+
+int
+sock_tls_write(sk_t *sk)
+{
+     turn_off_events(sk, EPOLLOUT);
+     return start_tls_handshake(sk);
+}
+
+int
+start_tls_handshake(sk_t *sk)
+{
+     int ret;
+     if (0 >= (ret = SSL_connect(sk->ssl))) {
+          int rv = SSL_get_error(sk->ssl, ret);
+          if (rv == SSL_ERROR_WANT_READ)
+               turn_on_events(sk, EPOLLIN);
+          else if (rv == SSL_ERROR_WANT_WRITE)
+               turn_on_events(sk, EPOLLOUT);
+          else {
+               fprintf(stderr, "ssl errno=%d\n", rv);
+               ERR_print_errors_fp(stderr);
+               return (-1);
+          }
+     }
+     return 0;
+}
+
+#endif
