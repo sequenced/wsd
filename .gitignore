@@ -9,6 +9,7 @@
 *.sub
 *.log
 *.trs
+*.gz
 TAGS
 Makefile
 configure
