@@ -47,6 +47,7 @@
 extern bool done;
 
 int epfd = -1;
+char *bin = NULL;
 int wsd_errno = 0;
 wsd_config_t *wsd_cfg = NULL;
 sk_t *pp2sk = NULL; /* TODO avoid this reference */
@@ -97,10 +98,12 @@ static int skb_put_http_req(skb_t *buf, http_req_t *req);
 static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
 #ifdef HAVE_LIBSSL
-static int sock_tls_init(sk_t *sk, const char *hostname);
-static int sock_tls_read(sk_t *sk);
-static int sock_tls_write(sk_t *sk);
-static int start_tls_handshake(sk_t *sk);
+static int wssk_tls_init(sk_t *sk, const char *hostname);
+static int wssk_tls_handshake_read(sk_t *sk);
+static int wssk_tls_handshake_write(sk_t *sk);
+static int wssk_tls_handshake(sk_t *sk);
+static int wssk_tls_read(sk_t *sk);
+static int wssk_tls_write(sk_t *sk);
 #endif
 int
 main(int argc, char **argv)
@@ -117,6 +120,9 @@ main(int argc, char **argv)
      char *sec_ws_proto_arg = NULL;
      char *sec_ws_ver_arg = "13";
      char *sec_ws_key_arg = "B9Pc1t39Tqoj+fidr/bzeg==";
+
+     char *s;
+     bin = (s = strrchr(argv[0], '/')) ? (char*)(s + 1) : argv[0];
 
      while ((opt = getopt_long(argc,
                                argv,
@@ -152,13 +158,13 @@ main(int argc, char **argv)
                repeat_last_num_arg = atoi(optarg);
                break;
           case 'h':
-               print_help(argv[0]);
+               print_help(bin);
                exit(EXIT_SUCCESS);
                break;
           default:
                fprintf(stderr,
                        "Try '%s --help' for more information.\n",
-                       argv[0]);
+                       bin);
                exit(EXIT_FAILURE);
           };
      }
@@ -201,7 +207,7 @@ main(int argc, char **argv)
 
 #ifdef HAVE_LIBSSL
      if (wsd_cfg->tls)
-          start_tls_handshake(wssk);
+          wssk_tls_handshake(wssk);
      else
 #endif
           if (0 > create_http_req(wssk))
@@ -294,14 +300,15 @@ wssk_init()
                           &hints,
                           &res);
      if (0 > rv) {
-          fprintf(stderr, "wscat: cannot resolve: %s\n", gai_strerror(rv));
+          fprintf(stderr, "%s: cannot resolve: %s\n", bin, gai_strerror(rv));
           AZ(close(fd));
           return (-1);
      }
 
      if (AF_INET != res->ai_family) {
           fprintf(stderr,
-                  "wscat: unexpected address family: %d\n",
+                  "%s: unexpected address family: %d\n",
+                  bin,
                   res->ai_family);
           AZ(close(fd));
           freeaddrinfo(res);
@@ -316,7 +323,7 @@ wssk_init()
      }
      freeaddrinfo(res);
      if (0 > rv && EINPROGRESS != errno) {
-          fprintf(stderr, "wscat: connect: %s\n", strerror(errno));
+          fprintf(stderr, "%s: connect: %s\n", bin, strerror(errno));
           AZ(close(fd));
           return (-1);
      }
@@ -329,14 +336,14 @@ wssk_init()
      memset(wssk, 0, sizeof(sk_t));
 
      if (0 > sock_init(wssk, fd, 0ULL)) {
-          fprintf(stderr, "wscat: sock_init: 0x%x\n", wsd_errno);
+          fprintf(stderr, "%s: sock_init: 0x%x\n", bin, wsd_errno);
           AZ(close(fd));
           return (-1);
      }
 
 #ifdef HAVE_LIBSSL
-     if (wsd_cfg->tls && 0 > sock_tls_init(wssk, wsd_cfg->fwd_hostname)) {
-          fprintf(stderr, "wscat: sock_tls_init");
+     if (wsd_cfg->tls && 0 > wssk_tls_init(wssk, wsd_cfg->fwd_hostname)) {
+          fprintf(stderr, "%s: wssk_tls_init", bin);
           AZ(close(fd));
           return (-1);
      }
@@ -414,7 +421,8 @@ wssk_http_recv(sk_t *sk)
      rv = http_header_tok(&sk->recvbuf->data[sk->recvbuf->rdpos], &tok);
      if (0 > rv) {
           fprintf(stderr,
-                  "wscat: failed tokenising HTTP header: 0x%x\n",
+                  "%s: failed tokenising HTTP header: 0x%x\n",
+                  bin,
                   wsd_errno);
 
           goto error;
@@ -426,7 +434,8 @@ wssk_http_recv(sk_t *sk)
 
           if (0 > parse_header_field(&tok, &hreq)) {
                fprintf(stderr,
-                       "wscat: failed parsing HTTP header field: 0x%x\n",
+                       "%s: failed parsing HTTP header field: 0x%x\n",
+                       bin,
                        wsd_errno);
 
                goto error;
@@ -845,7 +854,7 @@ wssk_ws_start_closing_handshake()
 
 #ifdef HAVE_LIBSSL
 int
-sock_tls_init(sk_t *sk, const char *hostname)
+wssk_tls_init(sk_t *sk, const char *hostname)
 {
      if (!(sk->sslctx = SSL_CTX_new(TLS_client_method()))) {
           ERR_print_errors_fp(stderr);
@@ -883,28 +892,28 @@ sock_tls_init(sk_t *sk, const char *hostname)
           return (-1);
      }
 
-     sk->ops->read = sock_tls_read;
-     sk->ops->write = sock_tls_write;
+     sk->ops->read = wssk_tls_handshake_read;
+     sk->ops->write = wssk_tls_handshake_write;
      
      return 0;
 }
 
 int
-sock_tls_read(sk_t *sk)
+wssk_tls_handshake_read(sk_t *sk)
 {
      turn_off_events(sk, EPOLLIN);
-     return start_tls_handshake(sk);
+     return wssk_tls_handshake(sk);
 }
 
 int
-sock_tls_write(sk_t *sk)
+wssk_tls_handshake_write(sk_t *sk)
 {
      turn_off_events(sk, EPOLLOUT);
-     return start_tls_handshake(sk);
+     return wssk_tls_handshake(sk);
 }
 
 int
-start_tls_handshake(sk_t *sk)
+wssk_tls_handshake(sk_t *sk)
 {
      int ret;
      if (0 >= (ret = SSL_connect(sk->ssl))) {
@@ -914,12 +923,36 @@ start_tls_handshake(sk_t *sk)
           else if (rv == SSL_ERROR_WANT_WRITE)
                turn_on_events(sk, EPOLLOUT);
           else {
-               fprintf(stderr, "ssl errno=%d\n", rv);
-               ERR_print_errors_fp(stderr);
+               fprintf(stderr,
+                       "%s: %s\n",
+                       bin,
+                       ERR_reason_error_string(rv));
+//               ERR_print_errors_fp(stderr);
                return (-1);
           }
+     } else {
+          /* TLS handshake successfully completed */
+          sk->ops->read = wssk_tls_read;
+          sk->ops->write = wssk_tls_write;
+
+          if (0 > create_http_req(sk))
+               return (-1);
+
+          turn_on_events(sk, EPOLLOUT);
      }
      return 0;
+}
+
+int
+wssk_tls_read(sk_t *sk)
+{
+     return (-1);
+}
+
+int
+wssk_tls_write(sk_t *sk)
+{
+     return (-1);
 }
 
 #endif
