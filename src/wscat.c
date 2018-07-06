@@ -30,7 +30,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #endif
@@ -96,7 +96,7 @@ static int create_http_req(sk_t *sk);
 static int skb_put_http_req(skb_t *buf, http_req_t *req);
 static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
 static int sock_tls_init(sk_t *sk, const char *hostname);
 static int sock_tls_read(sk_t *sk);
 static int sock_tls_write(sk_t *sk);
@@ -192,14 +192,14 @@ main(int argc, char **argv)
      wsd_cfg->sec_ws_proto = sec_ws_proto_arg;
      wsd_cfg->sec_ws_ver = sec_ws_ver_arg;
      wsd_cfg->sec_ws_key = sec_ws_key_arg;
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
      wsd_cfg->tls = true; // TODO Set from command line
 #endif
 
      if (0 > wssk_init())
           exit(EXIT_FAILURE);
 
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
      if (wsd_cfg->tls)
           start_tls_handshake(wssk);
      else
@@ -334,7 +334,7 @@ wssk_init()
           return (-1);
      }
 
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
      if (wsd_cfg->tls && 0 > sock_tls_init(wssk, wsd_cfg->fwd_hostname)) {
           fprintf(stderr, "wscat: sock_tls_init");
           AZ(close(fd));
@@ -843,7 +843,7 @@ wssk_ws_start_closing_handshake()
           done = true;
 }
 
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
 int
 sock_tls_init(sk_t *sk, const char *hostname)
 {

@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <netinet/in.h>
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
 #include <openssl/ssl.h>
 #endif
 #include "list.h"
@@ -105,7 +105,7 @@ struct sk {
      struct timespec    ts_closing_handshake_start;
      struct sockaddr_in src_addr;        /* Source address iff socket        */
      struct sockaddr_in dst_addr;        /* Destination address iff socket   */
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
      SSL_CTX           *sslctx;
      SSL               *ssl;
 #endif
@@ -142,7 +142,7 @@ typedef struct {
      char       *sec_ws_proto;
      char       *sec_ws_ver;
      char       *sec_ws_key;
-#ifdef HAVE_OPENSSL_SHA_H
+#ifdef HAVE_LIBSSL
      bool        tls;          /* TLS requested                              */
 #endif
 } wsd_config_t;

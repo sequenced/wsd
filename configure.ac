@@ -28,7 +28,7 @@ AC_PROG_RANLIB
 
 # Checks for libraries.
 AC_CHECK_LIB(crypto, BIO_f_base64,, AC_MSG_FAILURE(cannot find libcrypto))
-AC_CHECK_LIB(ssl, SSL_CTX_new,, AC_MSG_FAILURE(cannot find libssl))
+AC_CHECK_LIB(ssl, SSL_CTX_new)
 
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netinet/in.h stddef.h stdlib.h string.h sys/socket.h sys/time.h syslog.h unistd.h endian.h openssl/sha.h])
