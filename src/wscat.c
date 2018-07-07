@@ -104,7 +104,9 @@ static int wssk_tls_handshake_write(sk_t *sk);
 static int wssk_tls_handshake(sk_t *sk);
 static int wssk_tls_read(sk_t *sk);
 static int wssk_tls_write(sk_t *sk);
+static void print_tls_error();
 #endif
+
 int
 main(int argc, char **argv)
 {
@@ -916,28 +918,22 @@ int
 wssk_tls_handshake(sk_t *sk)
 {
      int ret;
-     if (0 >= (ret = SSL_connect(sk->ssl))) {
+     if (0 >= (ret = SSL_do_handshake(sk->ssl))) {
           int rv = SSL_get_error(sk->ssl, ret);
           if (rv == SSL_ERROR_WANT_READ)
                turn_on_events(sk, EPOLLIN);
           else if (rv == SSL_ERROR_WANT_WRITE)
                turn_on_events(sk, EPOLLOUT);
           else {
-               fprintf(stderr,
-                       "%s: %s\n",
-                       bin,
-                       ERR_reason_error_string(rv));
-//               ERR_print_errors_fp(stderr);
+               print_tls_error();
                return (-1);
           }
      } else {
           /* TLS handshake successfully completed */
           sk->ops->read = wssk_tls_read;
           sk->ops->write = wssk_tls_write;
-
           if (0 > create_http_req(sk))
                return (-1);
-
           turn_on_events(sk, EPOLLOUT);
      }
      return 0;
@@ -952,7 +948,43 @@ wssk_tls_read(sk_t *sk)
 int
 wssk_tls_write(sk_t *sk)
 {
+     int len = SSL_write(sk->ssl,
+                         &sk->sendbuf->data[sk->sendbuf->rdpos],
+                         skb_rdsz(sk->sendbuf));
+
+     if (len > 0) {
+          sk->sendbuf->rdpos += len;
+          skb_compact(sk->sendbuf);
+          if (0 == skb_rdsz(sk->sendbuf))
+               turn_off_events(sk, EPOLLOUT);
+          return 0;
+     }
+
+     int rv = SSL_get_error(sk->ssl, len);
+     if (rv == SSL_ERROR_WANT_WRITE) {
+          /* Noop - try again. */
+          return 0;
+     } else if (rv == SSL_ERROR_WANT_READ) {
+          /* TLS renegotiation */
+          sk->ops->read = wssk_tls_handshake_read;
+          sk->ops->write = wssk_tls_handshake_write;
+          turn_on_events(sk, EPOLLIN);
+          return 0;
+     }
+
+     print_tls_error();
      return (-1);
+}
+
+void
+print_tls_error()
+{
+     unsigned long code;
+     while (0 != (code = ERR_get_error()))
+          fprintf(stderr,
+                  "%s: %s\n",
+                  bin,
+                  ERR_reason_error_string(code));
 }
 
 #endif
