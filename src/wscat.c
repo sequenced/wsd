@@ -52,6 +52,13 @@ int wsd_errno = 0;
 wsd_config_t *wsd_cfg = NULL;
 sk_t *pp2sk = NULL; /* TODO avoid this reference */
 
+/* See RFC3986, section 3 */
+typedef struct {
+     chunk_t scheme;
+     chunk_t host;
+     chunk_t port;
+} uri_t;
+
 static struct option long_opt[] = {
      {"sec-ws-ver",   required_argument, 0, 'V'},
      {"sec-ws-proto", required_argument, 0, 'P'},
@@ -75,7 +82,6 @@ static bool repeat_last_armed = false;
 static skb_t *last_input = NULL;
 
 static int wssk_init();
-static int io_loop(void);
 static int stdin_close(sk_t *sk);
 static int wssk_close(sk_t *sk);
 static int post_read(sk_t *sk);
@@ -97,6 +103,7 @@ static int create_http_req(sk_t *sk);
 static int skb_put_http_req(skb_t *buf, http_req_t *req);
 static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
+static int parse_uri(const char *uri_arg, uri_t *uri);
 #ifdef HAVE_LIBSSL
 static int wssk_tls_init(sk_t *sk, const char *hostname);
 static int wssk_tls_handshake_read(sk_t *sk);
@@ -171,11 +178,16 @@ main(int argc, char **argv)
           };
      }
 
-     if (optind < argc)
-          fwd_hostname_arg = argv[optind++];
+     if (optind < argc) {
+          uri_t uri;
+          memset((void*)&uri, 0, sizeof(uri_t));
+          if (0 > parse_uri(argv[optind], &uri)) {
+               fprintf(stderr, "%s: bad URI: %s\n", bin, argv[optind]);
+               exit(EXIT_FAILURE);
+          }
 
-     if (optind < argc)
-          fwd_port_arg = argv[optind];
+          // TODO
+     }
 
      is_json = is_json_arg;
      no_handshake = no_handshake_arg;
@@ -227,6 +239,12 @@ main(int argc, char **argv)
      free(wsd_cfg);
 
      return rv;
+}
+
+int
+parse_uri(const char *uri_arg, uri_t *uri)
+{
+     return (-1);
 }
 
 int
@@ -754,7 +772,7 @@ skb_put_http_req(skb_t *buf, http_req_t *req)
 void
 print_help(const char *bin)
 {
-     printf("Usage: %s [OPTIONS]... [HOST [PORT]]\n", bin);
+     printf("Usage: %s [OPTIONS]... [URI]\n", bin);
      fputs("\
 Write to and read from remote system HOST via websocket protocol.\n\n\
   -A, --user-agent    set User-Agent string in HTTP upgrade request\n\
@@ -929,12 +947,13 @@ wssk_tls_handshake(sk_t *sk)
                return (-1);
           }
      } else {
-          /* TLS handshake successfully completed */
+          if (LOG_VERBOSE <= wsd_cfg->verbose)
+               fprintf(stderr, "%s: TLS negotiated\n", bin);
           sk->ops->read = wssk_tls_read;
           sk->ops->write = wssk_tls_write;
           if (0 > create_http_req(sk))
                return (-1);
-          turn_on_events(sk, EPOLLOUT);
+          turn_on_events(sk, EPOLLOUT|EPOLLIN);
      }
      return 0;
 }
@@ -942,12 +961,51 @@ wssk_tls_handshake(sk_t *sk)
 int
 wssk_tls_read(sk_t *sk)
 {
+     A(0 <= sk->fd);
+
+     if (0 == skb_wrsz(sk->recvbuf)) {
+          turn_off_events(sk, EPOLLIN);
+          wsd_errno = WSD_EAGAIN;
+          return (-1);
+     }
+
+     A(0 < skb_wrsz(sk->recvbuf));
+     int len = SSL_read(sk->ssl,
+                        &sk->recvbuf->data[sk->recvbuf->wrpos],
+                        skb_wrsz(sk->recvbuf));
+
+     if (len > 0) {
+          sk->recvbuf->wrpos += len;
+          return 0;
+     }
+
+     int rv = SSL_get_error(sk->ssl, len);
+     if (rv == SSL_ERROR_WANT_READ) {
+          /* Noop - try again. */
+          return 0;
+     } else if (rv == SSL_ERROR_WANT_WRITE) {
+          if (LOG_VERBOSE <= wsd_cfg->verbose)
+               fprintf(stderr, "%s: TLS renegotiation upon read\n", bin);
+          sk->ops->read = wssk_tls_handshake_read;
+          sk->ops->write = wssk_tls_handshake_write;
+          turn_on_events(sk, EPOLLOUT);
+          return 0;
+     }
+
+     print_tls_error();
      return (-1);
 }
 
 int
 wssk_tls_write(sk_t *sk)
 {
+     if (0 == skb_rdsz(sk->sendbuf)) {
+          turn_off_events(sk, EPOLLOUT);
+          wsd_errno = WSD_EAGAIN;
+          return (-1);
+     }
+
+     A(0 < skb_rdsz(sk->sendbuf));
      int len = SSL_write(sk->ssl,
                          &sk->sendbuf->data[sk->sendbuf->rdpos],
                          skb_rdsz(sk->sendbuf));
@@ -955,8 +1013,6 @@ wssk_tls_write(sk_t *sk)
      if (len > 0) {
           sk->sendbuf->rdpos += len;
           skb_compact(sk->sendbuf);
-          if (0 == skb_rdsz(sk->sendbuf))
-               turn_off_events(sk, EPOLLOUT);
           return 0;
      }
 
@@ -965,7 +1021,8 @@ wssk_tls_write(sk_t *sk)
           /* Noop - try again. */
           return 0;
      } else if (rv == SSL_ERROR_WANT_READ) {
-          /* TLS renegotiation */
+          if (LOG_VERBOSE <= wsd_cfg->verbose)
+               fprintf(stderr, "%s: TLS renegotiation upon write\n", bin);
           sk->ops->read = wssk_tls_handshake_read;
           sk->ops->write = wssk_tls_handshake_write;
           turn_on_events(sk, EPOLLIN);
@@ -984,7 +1041,7 @@ print_tls_error()
           fprintf(stderr,
                   "%s: %s\n",
                   bin,
-                  ERR_reason_error_string(code));
+                  ERR_error_string(code, NULL));
 }
 
 #endif

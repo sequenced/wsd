@@ -5,4 +5,4 @@ wsd_SOURCES = wsd.c wschild.c wschild.h pp2.c pp2.h ws.c ws.h ws_wsd.c \
 wsd_LDFLAGS = -ldl
 wscat_SOURCES = wscat.c common.c parser.c ws.c
 noinst_LIBRARIES = libtestcommon.a
-libtestcommon_a_SOURCES = wschild.c pp2.c http.c
+libtestcommon_a_SOURCES = wschild.c pp2.c http.c wscat.c
