@@ -1,5 +1,7 @@
 TESTS = $(check_PROGRAMS)
-check_PROGRAMS = GIVEN_valid_uri_WHEN_parsing_THEN_valid_struct
+check_PROGRAMS = uri
+uri_LDADD = $(top_builddir)/src/liburi.a
+uri_CPPFLAGS = -I$(top_srcdir)/src
 #check_PROGRAMS = test2 test4
 #test1_LDADD = ../src/libtestcommon.a
 #test2_LDADD = ../src/libtestcommon.a

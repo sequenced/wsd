@@ -38,6 +38,7 @@
 #include "types.h"
 #include "common.h"
 #include "parser.h"
+#include "uri.h"
 
 #define skb_put_chunk(dst, src)                 \
      skb_put_strn(dst, src.p, src.len)
@@ -51,13 +52,6 @@ char *bin = NULL;
 int wsd_errno = 0;
 wsd_config_t *wsd_cfg = NULL;
 sk_t *pp2sk = NULL; /* TODO avoid this reference */
-
-/* See RFC3986, section 3 */
-typedef struct {
-     chunk_t scheme;
-     chunk_t host;
-     chunk_t port;
-} uri_t;
 
 static struct option long_opt[] = {
      {"sec-ws-ver",   required_argument, 0, 'V'},
@@ -103,7 +97,6 @@ static int create_http_req(sk_t *sk);
 static int skb_put_http_req(skb_t *buf, http_req_t *req);
 static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
-static int parse_uri(const char *uri_arg, uri_t *uri);
 #ifdef HAVE_LIBSSL
 static int wssk_tls_init(sk_t *sk, const char *hostname);
 static int wssk_tls_handshake_read(sk_t *sk);
@@ -239,12 +232,6 @@ main(int argc, char **argv)
      free(wsd_cfg);
 
      return rv;
-}
-
-int
-parse_uri(const char *uri_arg, uri_t *uri)
-{
-     return (-1);
 }
 
 int
