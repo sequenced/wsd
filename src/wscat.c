@@ -223,8 +223,17 @@ main(int argc, char **argv)
      if (!fwd_hostname_arg)
           fwd_hostname_arg = strdup("localhost");
 
+#ifdef HAVE_LIBSSL
+     if (!fwd_port_arg) {
+          if (tls_arg)
+               fwd_port_arg = strdup("443");
+          else
+               fwd_port_arg = strdup("80");
+     }
+#else
      if (!fwd_port_arg)
-          fwd_port_arg = strdup("6084");
+          fwd_port_arg = strdup("80");
+#endif
 
      wsd_cfg = malloc(sizeof(wsd_config_t));
      A(wsd_cfg);
@@ -444,6 +453,9 @@ stdin_close(sk_t *sk)
 int
 post_read(sk_t *sk)
 {
+     if (!skb_rdsz(sk->recvbuf))
+          return 0;
+
      return sk->ops->recv(sk);
 }
 
