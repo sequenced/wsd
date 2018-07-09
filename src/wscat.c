@@ -55,19 +55,22 @@ wsd_config_t *wsd_cfg = NULL;
 sk_t *pp2sk = NULL; /* TODO avoid this reference */
 
 static struct option long_opt[] = {
-     {"sec-ws-ver",   required_argument, 0, 'V'},
-     {"sec-ws-proto", required_argument, 0, 'P'},
-     {"sec-ws-key",   required_argument, 0, 'K'},
-     {"user-agent",   required_argument, 0, 'A'},
-     {"idle-timeout", required_argument, 0, 'i'},
-     {"json",         required_argument, 0, 'j'},
-     {"repeat-last",  required_argument, 0, 'R'},
-     {"no-handshake", no_argument,       0, 'N'},
-     {"verbose",      no_argument,       0, 'v'},
-     {"help",         no_argument,       0, 'h'},
+     {"sec-ws-ver",           required_argument, 0, 'V'},
+     {"sec-ws-proto",         required_argument, 0, 'P'},
+     {"sec-ws-key",           required_argument, 0, 'K'},
+     {"user-agent",           required_argument, 0, 'A'},
+     {"idle-timeout",         required_argument, 0, 'i'},
+     {"json",                 required_argument, 0, 'j'},
+     {"repeat-last",          required_argument, 0, 'R'},
+     {"no-handshake",         no_argument,       0, 'N'},
+     {"verbose",              no_argument,       0, 'v'},
+#ifdef HAVE_LIBSSL
+     {"no-check-certificate", no_argument,       0, 'x'},
+#endif
+     {"help",                 no_argument,       0, 'h'},
      {0, 0, 0, 0}
 };
-static const char *optstring = "V:P:K:A:i:R:vhjN";
+static const char *optstring = "V:P:K:A:i:R:vhjNx";
 static sk_t *fdin = NULL;
 static sk_t *wssk = NULL;
 static bool is_json = false;
@@ -125,6 +128,7 @@ main(int argc, char **argv)
      char *sec_ws_key_arg = "B9Pc1t39Tqoj+fidr/bzeg==";
 #ifdef HAVE_LIBSSL
      bool tls_arg = false;
+     bool no_check_cert_arg = false;
 #endif
 
      char *s;
@@ -163,6 +167,11 @@ main(int argc, char **argv)
           case 'R':
                repeat_last_num_arg = atoi(optarg);
                break;
+#ifdef HAVE_LIBSSL
+          case 'x':
+               no_check_cert_arg = true;
+               break;
+#endif
           case 'h':
                print_help(bin);
                exit(EXIT_SUCCESS);
@@ -250,6 +259,7 @@ main(int argc, char **argv)
      wsd_cfg->sec_ws_key = sec_ws_key_arg;
 #ifdef HAVE_LIBSSL
      wsd_cfg->tls = tls_arg;
+     wsd_cfg->no_check_cert = no_check_cert_arg;
 #endif
 
      if (0 > wssk_init())
@@ -827,6 +837,13 @@ Write to and read from remote system HOST via websocket protocol.\n\n\
   -R, --repeat-last   repeat last input as many times as specified\n\
   -N, --no-handshake  do not start or finish a closing handshake\n\
   -v, --verbose       be verbose (use multiple times for maximum effect)\n\
+"
+#ifdef HAVE_LIBSSL
+"\
+  -x, --no-check-certificate\n\
+                      do not check server certificate\n"
+#endif
+"\
   -h, --help          display this help and exit\n\n\
 ", stdout);
      printf("Version %s - Please send bug reports to: %s\n",
@@ -937,7 +954,10 @@ wssk_tls_init(sk_t *sk, const char *hostname)
 
      // TODO Could set cipher list here
 
-     SSL_CTX_set_verify(sk->sslctx, SSL_VERIFY_PEER, NULL);
+     int mode = SSL_VERIFY_PEER;
+     if (wsd_cfg->no_check_cert)
+          mode = SSL_VERIFY_NONE;
+     SSL_CTX_set_verify(sk->sslctx, mode, NULL);
 
      if (!(sk->ssl = SSL_new(sk->sslctx))) {
           ERR_print_errors_fp(stderr);
@@ -1085,5 +1105,4 @@ print_tls_error()
                   bin,
                   ERR_error_string(code, NULL));
 }
-
 #endif

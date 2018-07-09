@@ -144,6 +144,7 @@ typedef struct {
      char       *sec_ws_key;
 #ifdef HAVE_LIBSSL
      bool        tls;          /* TLS requested                              */
+     bool        no_check_cert;/* TLS certificate checking not requested     */
 #endif
 } wsd_config_t;
 
