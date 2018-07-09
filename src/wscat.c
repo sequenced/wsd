@@ -182,9 +182,11 @@ main(int argc, char **argv)
                exit(EXIT_FAILURE);
           }
 #ifdef HAVE_LIBSSL
-          if (0 == strncasecmp("wss", uri.scheme.p, uri.scheme.len))
+          if (3 == uri.scheme.len
+              && 0 == strncasecmp("wss", uri.scheme.p, uri.scheme.len))
                tls_arg = true;
-          else if (0 != strncasecmp("ws", uri.scheme.p, uri.scheme.len)) {
+          else if (2 != uri.scheme.len
+                   || 0 != strncasecmp("ws", uri.scheme.p, 2)) {
                fprintf(stderr,
                        "%s: can`t speak: %.*3$s\n",
                        bin,
@@ -193,7 +195,8 @@ main(int argc, char **argv)
                exit(EXIT_FAILURE);
           }
 #else
-          if (0 != strncasecmp("ws", uri.scheme.p, uri.scheme.len)) {
+          if (2 != uri.scheme.len
+              || 0 != strncasecmp("ws", uri.scheme.p, 2)) {
                fprintf(stderr,
                        "%s: can`t speak: %.*3$s\n",
                        bin,
