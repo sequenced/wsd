@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2017 Michael Goldschmidt
+ *  Copyright (C) 2017-2018 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -33,6 +33,7 @@
 #ifdef HAVE_LIBSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/x509v3.h>
 #endif
 #include "ws.h"
 #include "types.h"
@@ -782,7 +783,11 @@ skb_put_http_req(skb_t *buf, http_req_t *req)
      skb_put_strn(buf, "Host: ", 6);
      skb_put_chunk(buf, req->host);
      skb_put_strn(buf, "\r\n", 2);
-     skb_put_strn(buf, "Origin: http://", 15);
+
+     if (wsd_cfg->tls)
+          skb_put_strn(buf, "Origin: https://", 16);
+     else
+          skb_put_strn(buf, "Origin: http://", 15);
      skb_put_chunk(buf, req->origin);
      skb_put_strn(buf, "\r\n", 2);
 
@@ -932,8 +937,7 @@ wssk_tls_init(sk_t *sk, const char *hostname)
 
      // TODO Could set cipher list here
 
-     // TODO Verify cert
-     SSL_CTX_set_verify(sk->sslctx, SSL_VERIFY_NONE, NULL);
+     SSL_CTX_set_verify(sk->sslctx, SSL_VERIFY_PEER, NULL);
 
      if (!(sk->ssl = SSL_new(sk->sslctx))) {
           ERR_print_errors_fp(stderr);
@@ -944,7 +948,7 @@ wssk_tls_init(sk_t *sk, const char *hostname)
           ERR_print_errors_fp(stderr);
           return (-1);
      }
-
+     SSL_set_hostflags(sk->ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
      if (!SSL_set_fd(sk->ssl, sk->fd)) {
           ERR_print_errors_fp(stderr);
           return (-1);
