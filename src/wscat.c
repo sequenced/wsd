@@ -116,12 +116,15 @@ main(int argc, char **argv)
      int repeat_last_num_arg = -1;
      int idle_timeout_arg = -1;
      int verbose_arg = 0;
-     char *fwd_hostname_arg = "localhost";
-     char *fwd_port_arg = "6084";
+     char *fwd_hostname_arg = NULL;
+     char *fwd_port_arg = NULL;
      char *user_agent_arg = "wscat";
      char *sec_ws_proto_arg = NULL;
      char *sec_ws_ver_arg = "13";
      char *sec_ws_key_arg = "B9Pc1t39Tqoj+fidr/bzeg==";
+#ifdef HAVE_LIBSSL
+     bool tls_arg = false;
+#endif
 
      char *s;
      bin = (s = strrchr(argv[0], '/')) ? (char*)(s + 1) : argv[0];
@@ -178,8 +181,23 @@ main(int argc, char **argv)
                fprintf(stderr, "%s: bad URI: %s\n", bin, argv[optind]);
                exit(EXIT_FAILURE);
           }
+#ifdef HAVE_LIBSSL
+          if (0 == strncasecmp("wss", uri.scheme.p, uri.scheme.len))
+               tls_arg = true;
+          else
+#endif
+               if (0 != strncasecmp("ws", uri.scheme.p, uri.scheme.len)) {
+                    fprintf(stderr,
+                            "%s: can`t speak: %.*3$s\n",
+                            bin,
+                            uri.scheme.p,
+                            uri.scheme.len);
+                    exit(EXIT_FAILURE);
+               }
 
-          // TODO
+          fwd_hostname_arg = strndup(uri.host.p, uri.host.len);
+          if (uri.port.len)
+               fwd_port_arg = strndup(uri.port.p, uri.port.len);
      }
 
      is_json = is_json_arg;
@@ -190,7 +208,13 @@ main(int argc, char **argv)
           A(last_input);
           memset(last_input, 0, sizeof(skb_t));
           repeat_last_num = repeat_last_num_arg;
-     } 
+     }
+
+     if (!fwd_hostname_arg)
+          fwd_hostname_arg = strdup("localhost");
+
+     if (!fwd_port_arg)
+          fwd_port_arg = strdup("6084");
 
      wsd_cfg = malloc(sizeof(wsd_config_t));
      A(wsd_cfg);
@@ -206,7 +230,7 @@ main(int argc, char **argv)
      wsd_cfg->sec_ws_ver = sec_ws_ver_arg;
      wsd_cfg->sec_ws_key = sec_ws_key_arg;
 #ifdef HAVE_LIBSSL
-     wsd_cfg->tls = true; // TODO Set from command line
+     wsd_cfg->tls = tls_arg;
 #endif
 
      if (0 > wssk_init())
@@ -228,9 +252,9 @@ main(int argc, char **argv)
           free(last_input);
      
      AZ(close(epfd));
-
+     free(fwd_hostname_arg);
+     free(fwd_port_arg);
      free(wsd_cfg);
-
      return rv;
 }
 
