@@ -34,3 +34,4 @@ test/.deps
 autom4te.cache
 aclocal.m4
 test-driver
+uri
