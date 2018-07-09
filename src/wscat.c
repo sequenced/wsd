@@ -184,17 +184,24 @@ main(int argc, char **argv)
 #ifdef HAVE_LIBSSL
           if (0 == strncasecmp("wss", uri.scheme.p, uri.scheme.len))
                tls_arg = true;
-          else
+          else if (0 != strncasecmp("ws", uri.scheme.p, uri.scheme.len)) {
+               fprintf(stderr,
+                       "%s: can`t speak: %.*3$s\n",
+                       bin,
+                       uri.scheme.p,
+                       uri.scheme.len);
+               exit(EXIT_FAILURE);
+          }
+#else
+          if (0 != strncasecmp("ws", uri.scheme.p, uri.scheme.len)) {
+               fprintf(stderr,
+                       "%s: can`t speak: %.*3$s\n",
+                       bin,
+                       uri.scheme.p,
+                       uri.scheme.len);
+               exit(EXIT_FAILURE);
+          }
 #endif
-               if (0 != strncasecmp("ws", uri.scheme.p, uri.scheme.len)) {
-                    fprintf(stderr,
-                            "%s: can`t speak: %.*3$s\n",
-                            bin,
-                            uri.scheme.p,
-                            uri.scheme.len);
-                    exit(EXIT_FAILURE);
-               }
-
           fwd_hostname_arg = strndup(uri.host.p, uri.host.len);
           if (uri.port.len)
                fwd_port_arg = strndup(uri.port.p, uri.port.len);
@@ -219,7 +226,6 @@ main(int argc, char **argv)
      wsd_cfg = malloc(sizeof(wsd_config_t));
      A(wsd_cfg);
      memset(wsd_cfg, 0, sizeof(wsd_config_t));
-
      wsd_cfg->idle_timeout = idle_timeout_arg;
      wsd_cfg->fwd_hostname = fwd_hostname_arg;
      wsd_cfg->fwd_port = fwd_port_arg;
@@ -239,12 +245,18 @@ main(int argc, char **argv)
 #ifdef HAVE_LIBSSL
      if (wsd_cfg->tls)
           wssk_tls_handshake(wssk);
-     else
-#endif
+     else {
           if (0 > create_http_req(wssk))
                exit(EXIT_FAILURE);
      
+          turn_on_events(wssk, EPOLLOUT);
+     }
+#else
+     if (0 > create_http_req(wssk))
+          exit(EXIT_FAILURE);
+
      turn_on_events(wssk, EPOLLOUT);
+#endif
 
      int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
 
