@@ -973,6 +973,10 @@ wssk_tls_init(sk_t *sk, const char *hostname)
           ERR_print_errors_fp(stderr);
           return (-1);
      }
+     if (!SSL_set_tlsext_host_name(sk->ssl, hostname)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
 
      sk->ops->read = wssk_tls_handshake_read;
      sk->ops->write = wssk_tls_handshake_write;
