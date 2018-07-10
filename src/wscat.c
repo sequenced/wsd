@@ -214,7 +214,7 @@ main(int argc, char **argv)
                        uri.scheme.len);
                exit(EXIT_FAILURE);
           }
-#endif
+#endif /* #ifdef HAVE_LIBSSL */
           fwd_hostname_arg = strndup(uri.host.p, uri.host.len);
           if (uri.port.len)
                fwd_port_arg = strndup(uri.port.p, uri.port.len);
@@ -243,7 +243,7 @@ main(int argc, char **argv)
 #else
      if (!fwd_port_arg)
           fwd_port_arg = strdup("80");
-#endif
+#endif /* #ifdef HAVE_LIBSSL */
 
      wsd_cfg = malloc(sizeof(wsd_config_t));
      A(wsd_cfg);
@@ -279,7 +279,7 @@ main(int argc, char **argv)
           exit(EXIT_FAILURE);
 
      turn_on_events(wssk, EPOLLOUT);
-#endif
+#endif /* #ifdef HAVE_LIBSSL */
 
      int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
 
@@ -1109,4 +1109,4 @@ print_tls_error()
                   bin,
                   ERR_error_string(code, NULL));
 }
-#endif
+#endif /* #ifdef HAVE_LIBSSL */
