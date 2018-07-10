@@ -4,8 +4,7 @@ wscat \- write to and read from websocket
 .SH SYNOPSIS
 .SP
 .B wscat
-[OPTIONS]
-.I [URI]
+[OPTIONS] [URI]
 .SH DESCRIPTION
 The
 .B wscat
@@ -67,7 +66,7 @@ wscat ws://example:1234
 .EE
 
 .B wscat
-can only communicate with an encrypted websocket if your site has a resonably recent version of OpenSSL library installed.
+can only communicate with an encrypted websocket if your site has a resonably recent version of OpenSSL library installed. If no URI is specified at all then the command assumes a plaintext websocket at port 80 on localhost.
 .SH BUGS
 Please report to bugs@sequencedsystems.com.
 .SH "SEE ALSO"
