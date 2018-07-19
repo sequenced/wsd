@@ -432,7 +432,8 @@ wssk_init()
 int
 wssk_close(sk_t *sk) {
 #ifdef HAVE_LIBSSL
-     SSL_shutdown(sk->ssl); /* Unidirectional shutdown only. */
+     if (sk->ssl)
+          SSL_shutdown(sk->ssl); /* Unidirectional shutdown only. */
 #endif
      AZ(close(sk->fd));
      sock_destroy(sk);
