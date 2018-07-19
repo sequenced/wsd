@@ -12,7 +12,9 @@ daemon terminates websockets and multiplexes their frames to some backend using 
 .SH OPTIONS
 .TP
 .BI \-h " host"
-Multiplexes websocket frames to some host. Default is 127.0.0.1.
+Multiplexes websocket frames to some host. Default is 127.0.0.1. Use this option multiple times to specify additional hosts.
+.B wsd
+connects to the first host available.
 .TP
 .BI \-f " port"
 Multiplexes websocket frames to a port. Default is 6085.

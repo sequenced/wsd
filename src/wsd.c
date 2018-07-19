@@ -136,12 +136,12 @@ main(int argc, char **argv)
      memset(&cfg, 0x0, sizeof(wsd_config_t));
      cfg.uid = pwent->pw_uid;
      cfg.port = port_arg;
-     cfg.fwd_port = malloc(strlen(fwd_port_arg) + 1);
-     A(cfg.fwd_port);
-     strcpy(cfg.fwd_port, fwd_port_arg);
-     cfg.fwd_hostname = malloc(strlen(fwd_hostname_arg) + 1);
+     cfg.fwd_port = strdup(fwd_port_arg);
+     cfg.fwd_hostname = malloc(2);
      A(cfg.fwd_hostname);
-     strcpy(cfg.fwd_hostname, fwd_hostname_arg);
+     memset(cfg.fwd_hostname, 0, 2);
+     cfg.fwd_hostname[0] = malloc(strlen(fwd_hostname_arg) + 1);
+     strcpy(cfg.fwd_hostname[0], fwd_hostname_arg);
      cfg.verbose = verbose_arg;
      cfg.no_fork = no_fork_arg;
      cfg.pidfilename = pidfile_arg;
@@ -208,6 +208,9 @@ main(int argc, char **argv)
           AZ(close(cfg.lfd));
           if (cfg.pidfilename)
                AZ(unlink(cfg.pidfilename));
+          free(cfg.fwd_port);
+          free(cfg.fwd_hostname[0]);
+          free(cfg.fwd_hostname);
           syslog(LOG_INFO, "Stopped");
           closelog();
           exit(rv);

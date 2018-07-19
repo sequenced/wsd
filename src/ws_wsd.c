@@ -55,7 +55,7 @@ static bool is_valid_proto(http_req_t *hr);
 static bool is_valid_ver(http_req_t *hr);
 static int prepare_handshake(skb_t *b, http_req_t *hr);
 static int generate_accept_val(skb_t *b, http_req_t *hr);
-static int sock_open();
+static int sock_open(unsigned int num);
 
 int
 ws_recv(sk_t *sk)
@@ -72,7 +72,7 @@ ws_recv(sk_t *sk)
      AN(skb_rdsz(sk->recvbuf));
 
      if (NULL == pp2sk) {
-          if (0 > sock_open())
+          if (0 > sock_open(0))
                return (-1);
      }
 
@@ -273,7 +273,7 @@ generate_accept_val(skb_t *b, http_req_t *hr)
 }
 
 int
-sock_open()
+sock_open(unsigned int num)
 {
      AZ(pp2sk);
      if (!(pp2sk = malloc(sizeof(sk_t)))) {
@@ -294,16 +294,23 @@ sock_open()
      hints.ai_family = AF_INET;
      hints.ai_socktype = SOCK_STREAM;
      hints.ai_flags = AI_NUMERICSERV;
-     int rv = getaddrinfo(wsd_cfg->fwd_hostname,
+     int rv = getaddrinfo(wsd_cfg->fwd_hostname[num],
                           wsd_cfg->fwd_port,
                           &hints,
                           &res);
      if (0 > rv) {
-          syslog(LOG_ERR, "%s: %s", gai_strerror(rv), wsd_cfg->fwd_hostname);
+          syslog(LOG_ERR,
+                 "%s: %s",
+                 gai_strerror(rv),
+                 wsd_cfg->fwd_hostname[num]);
           wsd_errno = WSD_CHECKERRNO;
           goto error;
      }
-     AZ(res->ai_next);
+     while (res->ai_next) {
+          if (AF_INET == res->ai_family)
+               break;
+          res = res->ai_next;
+     }
      if (AF_INET != res->ai_family) {
           wsd_errno = WSD_ENUM;
           goto error;

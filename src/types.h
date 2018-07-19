@@ -132,7 +132,7 @@ typedef struct {
      int         lfd;          /* Listening socket fd iff wsd                */
      int         port;
      char       *fwd_port;
-     char       *fwd_hostname;
+     char      **fwd_hostname;
      const char *pidfilename;
      int         verbose;
      bool        no_fork;      /* Does not fork, stays attached to terminal  */
