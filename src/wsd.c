@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2014-2017 Michael Goldschmidt
+ *  Copyright (C) 2014-2018 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -154,7 +154,7 @@ main(int argc, char **argv)
           umask(0);
 
           openlog(ident, LOG_PID, LOG_USER);
-          syslog(LOG_INFO, "starting");
+          syslog(LOG_INFO, "Starting");
 
           if (!cfg.no_fork) {
                ERREXIT(0 > setsid(), "setsid");
@@ -203,13 +203,10 @@ main(int argc, char **argv)
           int rv = wschild_main(&cfg);
 
           AZ(close(cfg.lfd));
-          
-          syslog(LOG_INFO, "stopped");
-          closelog();
-
           if (cfg.pidfilename)
                AZ(unlink(cfg.pidfilename));
-
+          syslog(LOG_INFO, "Stopped");
+          closelog();
           exit(rv);
      }
 

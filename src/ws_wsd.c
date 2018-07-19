@@ -22,6 +22,7 @@
 #include <string.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <sys/epoll.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -298,9 +299,7 @@ sock_open()
                           &hints,
                           &res);
      if (0 > rv) {
-          if (LOG_VVVERBOSE <= wsd_cfg->verbose)
-               printf("\tcannot resolve %s\n", gai_strerror(rv));
-
+          syslog(LOG_ERR, "%s: %s", gai_strerror(rv), wsd_cfg->fwd_hostname);
           wsd_errno = WSD_CHECKERRNO;
           goto error;
      }
