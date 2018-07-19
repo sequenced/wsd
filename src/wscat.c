@@ -303,43 +303,25 @@ create_http_req(sk_t *sk)
 {
      http_req_t req;
      memset(&req, 0, sizeof(http_req_t));
-
-     A(req.method.p = malloc(3 + 1));
-     strcpy(req.method.p, "GET");
+     req.method.p = "GET";
      req.method.len = 3;
-
-     A(req.req_target.p = malloc(1 + 1));
-     strcpy(req.req_target.p, "/");
+     req.req_target.p = "/";
      req.req_target.len = 1;
-
-     A(req.http_ver.p = malloc(8 + 1));
-     strcpy(req.http_ver.p, "HTTP/1.1");
+     req.http_ver.p = "HTTP/1.1";
      req.http_ver.len = 8;
-
-     A(req.host.p = malloc(strlen(wsd_cfg->fwd_hostname[0]) + 1));
-     strcpy(req.host.p, wsd_cfg->fwd_hostname[0]);
+     req.host.p = strdup(wsd_cfg->fwd_hostname[0]);
      req.host.len = strlen(wsd_cfg->fwd_hostname[0]);
-
-     A(req.origin.p = malloc(strlen(wsd_cfg->fwd_hostname[0]) + 1));
-     strcpy(req.origin.p, wsd_cfg->fwd_hostname[0]);
+     req.origin.p = strdup(wsd_cfg->fwd_hostname[0]);
      req.origin.len = strlen(wsd_cfg->fwd_hostname[0]);
-
      if (wsd_cfg->sec_ws_proto) {
-          A(req.sec_ws_proto.p = malloc(strlen(wsd_cfg->sec_ws_proto) + 1));
-          strcpy(req.sec_ws_proto.p, wsd_cfg->sec_ws_proto);
+          req.sec_ws_proto.p = strdup(wsd_cfg->sec_ws_proto);
           req.sec_ws_proto.len = strlen(wsd_cfg->sec_ws_proto);
      }
-
-     A(req.sec_ws_key.p = malloc(strlen(wsd_cfg->sec_ws_key) + 1));
-     strcpy(req.sec_ws_key.p, wsd_cfg->sec_ws_key);
+     req.sec_ws_key.p = strdup(wsd_cfg->sec_ws_key);
      req.sec_ws_key.len = strlen(wsd_cfg->sec_ws_key);
-
-     A(req.sec_ws_ver.p = malloc(strlen(wsd_cfg->sec_ws_ver) + 1));
-     strcpy(req.sec_ws_ver.p, wsd_cfg->sec_ws_ver);
+     req.sec_ws_ver.p = strdup(wsd_cfg->sec_ws_ver);
      req.sec_ws_ver.len = strlen(wsd_cfg->sec_ws_ver);
-
-     A(req.user_agent.p = malloc(strlen(wsd_cfg->user_agent) + 1));
-     strcpy(req.user_agent.p, wsd_cfg->user_agent);
+     req.user_agent.p = strdup(wsd_cfg->user_agent);
      req.user_agent.len = strlen(wsd_cfg->user_agent);
      
      AZ(skb_put_http_req(sk->sendbuf, &req));
