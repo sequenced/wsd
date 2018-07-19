@@ -113,9 +113,9 @@ struct sk {
 typedef struct sk sk_t;
 
 struct proto {
-     int (*decode_handshake)(sk_t *sk, http_req_t *req); /* Decode handshake */
-     int (*decode_frame)(sk_t *sk);                 /* Decode single frame   */
-     int (*encode_frame)(sk_t *sk, wsframe_t *wsf); /* Encode single frame   */
+     int (*decode_handshake)(sk_t *sk, http_req_t *req);
+     int (*decode_frame)(sk_t *sk);                 /* Decodes single frame  */
+     int (*encode_frame)(sk_t *sk, wsframe_t *wsf); /* Encodes single frame  */
      int (*start_closing_handshake)(sk_t *sk, int status, bool mask);
 };
 

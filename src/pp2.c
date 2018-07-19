@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2017 Michael Goldschmidt
+ *  Copyright (C) 2017-2018 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -67,6 +67,7 @@ sk_t *pp2sk = NULL;
 extern unsigned int wsd_errno;
 extern DECLARE_HASHTABLE(sk_hash, 4);
 extern const wsd_config_t *wsd_cfg;
+extern struct list_head *sk_list;
 
 static const uint8_t pp2_sig_ver_cmd_fam[] =
 { 0x0d, 0x0a, 0x0d, 0x0a, 0x00, 0x0d, /* pp2 signature               */
@@ -303,11 +304,12 @@ pp2_printf(FILE *stream, char *p)
 
 int
 pp2_close(sk_t *sk) {
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose)
+          printf("%s:%d: %s: fd=%d\n", __FILE__, __LINE__, __func__, sk->fd);
      AZ(close(sk->fd));
+     list_del(&sk->sk_node);
      sock_destroy(sk);
      free(sk);
-
      pp2sk = NULL;
-
      return 0;
 }
