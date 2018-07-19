@@ -53,7 +53,7 @@ main(int argc, char **argv)
      int opt;
      int pidfd;
      int port_arg = DEFAULT_LISTENING_PORT;
-     int no_fork_arg = 0;
+     bool no_fork_arg = false;
      int idle_timeout_arg = DEFAULT_IDLE_TIMEOUT;
      int verbose_arg = 0;
      const char *fwd_port_arg = DEFAULT_FORWARD_PORT;
@@ -79,7 +79,7 @@ main(int argc, char **argv)
                fwd_port_arg = optarg;
                break;
           case 'd':
-               no_fork_arg = 1;
+               no_fork_arg = true;
                break;
           case 'v':
                verbose_arg++;
@@ -126,7 +126,10 @@ main(int argc, char **argv)
                exit(EXIT_FAILURE);
           }
 
-          AZ(fchown(pidfd, pwent->pw_uid, pwent->pw_gid));
+          if (0 > fchown(pidfd, pwent->pw_uid, pwent->pw_gid)) {
+               perror(argv[0]);
+               exit(EXIT_FAILURE);
+          }
      }
 
      wsd_config_t cfg;

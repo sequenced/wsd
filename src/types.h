@@ -135,7 +135,7 @@ typedef struct {
      char       *fwd_hostname;
      const char *pidfilename;
      int         verbose;
-     int         no_fork;      /* Does not fork, stays attached to terminal  */
+     bool        no_fork;      /* Does not fork, stays attached to terminal  */
      int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
      int         closing_handshake_timeout;
      char       *user_agent;
