@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2017 Michael Goldschmidt
+ *  Copyright (C) 2017-2018 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -18,6 +18,7 @@
  *
  */
 
+#include "config.h"
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -29,12 +30,16 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
-
-#include "config.h"
+#ifdef HAVE_LIBSSL
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/x509v3.h>
+#endif
 #include "ws.h"
 #include "types.h"
 #include "common.h"
 #include "parser.h"
+#include "uri.h"
 
 #define skb_put_chunk(dst, src)                 \
      skb_put_strn(dst, src.p, src.len)
@@ -44,24 +49,28 @@
 extern bool done;
 
 int epfd = -1;
+char *bin = NULL;
 int wsd_errno = 0;
 wsd_config_t *wsd_cfg = NULL;
 sk_t *pp2sk = NULL; /* TODO avoid this reference */
 
 static struct option long_opt[] = {
-     {"sec-ws-ver",   required_argument, 0, 'V'},
-     {"sec-ws-proto", required_argument, 0, 'P'},
-     {"sec-ws-key",   required_argument, 0, 'K'},
-     {"user-agent",   required_argument, 0, 'A'},
-     {"idle-timeout", required_argument, 0, 'i'},
-     {"json",         required_argument, 0, 'j'},
-     {"repeat-last",  required_argument, 0, 'R'},
-     {"no-handshake", no_argument,       0, 'N'},
-     {"verbose",      no_argument,       0, 'v'},
-     {"help",         no_argument,       0, 'h'},
+     {"sec-ws-ver",           required_argument, 0, 'V'},
+     {"sec-ws-proto",         required_argument, 0, 'P'},
+     {"sec-ws-key",           required_argument, 0, 'K'},
+     {"user-agent",           required_argument, 0, 'A'},
+     {"idle-timeout",         required_argument, 0, 'i'},
+     {"json",                 required_argument, 0, 'j'},
+     {"repeat-last",          required_argument, 0, 'R'},
+     {"no-handshake",         no_argument,       0, 'N'},
+     {"verbose",              no_argument,       0, 'v'},
+#ifdef HAVE_LIBSSL
+     {"no-check-certificate", no_argument,       0, 'x'},
+#endif
+     {"help",                 no_argument,       0, 'h'},
      {0, 0, 0, 0}
 };
-static const char *optstring = "V:P:K:A:i:R:vhjN";
+static const char *optstring = "V:P:K:A:i:R:vhjNx";
 static sk_t *fdin = NULL;
 static sk_t *wssk = NULL;
 static bool is_json = false;
@@ -71,7 +80,6 @@ static bool repeat_last_armed = false;
 static skb_t *last_input = NULL;
 
 static int wssk_init();
-static int io_loop(void);
 static int stdin_close(sk_t *sk);
 static int wssk_close(sk_t *sk);
 static int post_read(sk_t *sk);
@@ -89,9 +97,19 @@ static int wssk_ws_encode_data_frame(skb_t *dst,
 static int repeat_last();
 static void try_repeating_last();
 static int on_iteration(const struct timespec *now);
+static int create_http_req(sk_t *sk);
 static int skb_put_http_req(skb_t *buf, http_req_t *req);
 static int balanced_span(const skb_t *buf, const char begin, const char end);
 static void print_help();
+#ifdef HAVE_LIBSSL
+static int wssk_tls_init(sk_t *sk, const char *hostname);
+static int wssk_tls_handshake_read(sk_t *sk);
+static int wssk_tls_handshake_write(sk_t *sk);
+static int wssk_tls_handshake(sk_t *sk);
+static int wssk_tls_read(sk_t *sk);
+static int wssk_tls_write(sk_t *sk);
+static void print_tls_error();
+#endif
 
 int
 main(int argc, char **argv)
@@ -102,12 +120,19 @@ main(int argc, char **argv)
      int repeat_last_num_arg = -1;
      int idle_timeout_arg = -1;
      int verbose_arg = 0;
-     char *fwd_hostname_arg = "localhost";
-     char *fwd_port_arg = "6084";
+     char *fwd_hostname_arg = NULL;
+     char *fwd_port_arg = NULL;
      char *user_agent_arg = "wscat";
      char *sec_ws_proto_arg = NULL;
      char *sec_ws_ver_arg = "13";
      char *sec_ws_key_arg = "B9Pc1t39Tqoj+fidr/bzeg==";
+#ifdef HAVE_LIBSSL
+     bool tls_arg = false;
+     bool no_check_cert_arg = false;
+#endif
+
+     char *s;
+     bin = (s = strrchr(argv[0], '/')) ? (char*)(s + 1) : argv[0];
 
      while ((opt = getopt_long(argc,
                                argv,
@@ -142,23 +167,58 @@ main(int argc, char **argv)
           case 'R':
                repeat_last_num_arg = atoi(optarg);
                break;
+#ifdef HAVE_LIBSSL
+          case 'x':
+               no_check_cert_arg = true;
+               break;
+#endif
           case 'h':
-               print_help(argv[0]);
+               print_help(bin);
                exit(EXIT_SUCCESS);
                break;
           default:
                fprintf(stderr,
                        "Try '%s --help' for more information.\n",
-                       argv[0]);
+                       bin);
                exit(EXIT_FAILURE);
           };
      }
 
-     if (optind < argc)
-          fwd_hostname_arg = argv[optind++];
-
-     if (optind < argc)
-          fwd_port_arg = argv[optind];
+     if (optind < argc) {
+          uri_t uri;
+          memset((void*)&uri, 0, sizeof(uri_t));
+          if (0 > parse_uri(argv[optind], &uri)) {
+               fprintf(stderr, "%s: bad URI: %s\n", bin, argv[optind]);
+               exit(EXIT_FAILURE);
+          }
+#ifdef HAVE_LIBSSL
+          if (3 == uri.scheme.len
+              && 0 == strncasecmp("wss", uri.scheme.p, uri.scheme.len))
+               tls_arg = true;
+          else if (2 != uri.scheme.len
+                   || 0 != strncasecmp("ws", uri.scheme.p, 2)) {
+               fprintf(stderr,
+                       "%s: can`t speak: %.*3$s\n",
+                       bin,
+                       uri.scheme.p,
+                       uri.scheme.len);
+               exit(EXIT_FAILURE);
+          }
+#else
+          if (2 != uri.scheme.len
+              || 0 != strncasecmp("ws", uri.scheme.p, 2)) {
+               fprintf(stderr,
+                       "%s: can`t speak: %.*3$s\n",
+                       bin,
+                       uri.scheme.p,
+                       uri.scheme.len);
+               exit(EXIT_FAILURE);
+          }
+#endif /* #ifdef HAVE_LIBSSL */
+          fwd_hostname_arg = strndup(uri.host.p, uri.host.len);
+          if (uri.port.len)
+               fwd_port_arg = strndup(uri.port.p, uri.port.len);
+     }
 
      is_json = is_json_arg;
      no_handshake = no_handshake_arg;
@@ -168,22 +228,74 @@ main(int argc, char **argv)
           A(last_input);
           memset(last_input, 0, sizeof(skb_t));
           repeat_last_num = repeat_last_num_arg;
-     } 
+     }
+
+     if (!fwd_hostname_arg)
+          fwd_hostname_arg = strdup("localhost");
+
+#ifdef HAVE_LIBSSL
+     if (!fwd_port_arg) {
+          if (tls_arg)
+               fwd_port_arg = strdup("443");
+          else
+               fwd_port_arg = strdup("80");
+     }
+#else
+     if (!fwd_port_arg)
+          fwd_port_arg = strdup("80");
+#endif /* #ifdef HAVE_LIBSSL */
 
      wsd_cfg = malloc(sizeof(wsd_config_t));
      A(wsd_cfg);
      memset(wsd_cfg, 0, sizeof(wsd_config_t));
-
      wsd_cfg->idle_timeout = idle_timeout_arg;
      wsd_cfg->fwd_hostname = fwd_hostname_arg;
      wsd_cfg->fwd_port = fwd_port_arg;
      wsd_cfg->verbose = verbose_arg;
      wsd_cfg->lfd = -1;
+     wsd_cfg->user_agent = user_agent_arg;
+     wsd_cfg->sec_ws_proto = sec_ws_proto_arg;
+     wsd_cfg->sec_ws_ver = sec_ws_ver_arg;
+     wsd_cfg->sec_ws_key = sec_ws_key_arg;
+#ifdef HAVE_LIBSSL
+     wsd_cfg->tls = tls_arg;
+     wsd_cfg->no_check_cert = no_check_cert_arg;
+#endif
 
      if (0 > wssk_init())
           exit(EXIT_FAILURE);
 
-     /* Kick off handshake with HTTP upgrade request. */
+#ifdef HAVE_LIBSSL
+     if (wsd_cfg->tls)
+          wssk_tls_handshake(wssk);
+     else {
+          if (0 > create_http_req(wssk))
+               exit(EXIT_FAILURE);
+     
+          turn_on_events(wssk, EPOLLOUT);
+     }
+#else
+     if (0 > create_http_req(wssk))
+          exit(EXIT_FAILURE);
+
+     turn_on_events(wssk, EPOLLOUT);
+#endif /* #ifdef HAVE_LIBSSL */
+
+     int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
+
+     if (last_input)
+          free(last_input);
+     
+     AZ(close(epfd));
+     free(fwd_hostname_arg);
+     free(fwd_port_arg);
+     free(wsd_cfg);
+     return rv;
+}
+
+int
+create_http_req(sk_t *sk)
+{
      http_req_t req;
      memset(&req, 0, sizeof(http_req_t));
 
@@ -207,44 +319,33 @@ main(int argc, char **argv)
      strcpy(req.origin.p, wsd_cfg->fwd_hostname);
      req.origin.len = strlen(wsd_cfg->fwd_hostname);
 
-     if (sec_ws_proto_arg) {
-          A(req.sec_ws_proto.p = malloc(strlen(sec_ws_proto_arg) + 1));
-          strcpy(req.sec_ws_proto.p, sec_ws_proto_arg);
-          req.sec_ws_proto.len = strlen(sec_ws_proto_arg);
+     if (wsd_cfg->sec_ws_proto) {
+          A(req.sec_ws_proto.p = malloc(strlen(wsd_cfg->sec_ws_proto) + 1));
+          strcpy(req.sec_ws_proto.p, wsd_cfg->sec_ws_proto);
+          req.sec_ws_proto.len = strlen(wsd_cfg->sec_ws_proto);
      }
 
-     A(req.sec_ws_key.p = malloc(strlen(sec_ws_key_arg) + 1));
-     strcpy(req.sec_ws_key.p, sec_ws_key_arg);
-     req.sec_ws_key.len = strlen(sec_ws_key_arg);
+     A(req.sec_ws_key.p = malloc(strlen(wsd_cfg->sec_ws_key) + 1));
+     strcpy(req.sec_ws_key.p, wsd_cfg->sec_ws_key);
+     req.sec_ws_key.len = strlen(wsd_cfg->sec_ws_key);
 
-     A(req.sec_ws_ver.p = malloc(strlen(sec_ws_ver_arg) + 1));
-     strcpy(req.sec_ws_ver.p, sec_ws_ver_arg);
-     req.sec_ws_ver.len = strlen(sec_ws_ver_arg);
+     A(req.sec_ws_ver.p = malloc(strlen(wsd_cfg->sec_ws_ver) + 1));
+     strcpy(req.sec_ws_ver.p, wsd_cfg->sec_ws_ver);
+     req.sec_ws_ver.len = strlen(wsd_cfg->sec_ws_ver);
 
-     A(req.user_agent.p = malloc(strlen(user_agent_arg) + 1));
-     strcpy(req.user_agent.p, user_agent_arg);
-     req.user_agent.len = strlen(user_agent_arg);
+     A(req.user_agent.p = malloc(strlen(wsd_cfg->user_agent) + 1));
+     strcpy(req.user_agent.p, wsd_cfg->user_agent);
+     req.user_agent.len = strlen(wsd_cfg->user_agent);
      
-     AZ(skb_put_http_req(wssk->sendbuf, &req));
+     AZ(skb_put_http_req(sk->sendbuf, &req));
 
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
-          unsigned int len = skb_rdsz(wssk->sendbuf);
-          skb_print(stdout, wssk->sendbuf, len);
-          skb_rd_rewind(wssk->sendbuf, len);
+          unsigned int len = skb_rdsz(sk->sendbuf);
+          skb_print(stdout, sk->sendbuf, len);
+          skb_rd_rewind(sk->sendbuf, len);
      }
 
-     turn_on_events(wssk, EPOLLOUT);
-
-     int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
-
-     if (last_input)
-          free(last_input);
-     
-     AZ(close(epfd));
-
-     free(wsd_cfg);
-
-     return rv;
+     return 0;
 }
 
 int
@@ -265,14 +366,15 @@ wssk_init()
                           &hints,
                           &res);
      if (0 > rv) {
-          fprintf(stderr, "wscat: cannot resolve: %s\n", gai_strerror(rv));
+          fprintf(stderr, "%s: cannot resolve: %s\n", bin, gai_strerror(rv));
           AZ(close(fd));
           return (-1);
      }
 
      if (AF_INET != res->ai_family) {
           fprintf(stderr,
-                  "wscat: unexpected address family: %d\n",
+                  "%s: unexpected address family: %d\n",
+                  bin,
                   res->ai_family);
           AZ(close(fd));
           freeaddrinfo(res);
@@ -287,7 +389,7 @@ wssk_init()
      }
      freeaddrinfo(res);
      if (0 > rv && EINPROGRESS != errno) {
-          fprintf(stderr, "wscat: connect: %s\n", strerror(errno));
+          fprintf(stderr, "%s: connect: %s\n", bin, strerror(errno));
           AZ(close(fd));
           return (-1);
      }
@@ -300,10 +402,18 @@ wssk_init()
      memset(wssk, 0, sizeof(sk_t));
 
      if (0 > sock_init(wssk, fd, 0ULL)) {
-          fprintf(stderr, "wscat: sock_init: 0x%x\n", wsd_errno);
+          fprintf(stderr, "%s: sock_init: 0x%x\n", bin, wsd_errno);
           AZ(close(fd));
           return (-1);
      }
+
+#ifdef HAVE_LIBSSL
+     if (wsd_cfg->tls && 0 > wssk_tls_init(wssk, wsd_cfg->fwd_hostname)) {
+          fprintf(stderr, "%s: wssk_tls_init", bin);
+          AZ(close(fd));
+          return (-1);
+     }
+#endif
 
      wssk->ops->recv = wssk_http_recv;
      wssk->ops->close = wssk_close;
@@ -321,6 +431,10 @@ wssk_init()
 
 int
 wssk_close(sk_t *sk) {
+#ifdef HAVE_LIBSSL
+     if (sk->ssl)
+          SSL_shutdown(sk->ssl); /* Unidirectional shutdown only. */
+#endif
      AZ(close(sk->fd));
      sock_destroy(sk);
      free(sk);
@@ -354,6 +468,9 @@ stdin_close(sk_t *sk)
 int
 post_read(sk_t *sk)
 {
+     if (!skb_rdsz(sk->recvbuf))
+          return 0;
+
      return sk->ops->recv(sk);
 }
 
@@ -377,7 +494,8 @@ wssk_http_recv(sk_t *sk)
      rv = http_header_tok(&sk->recvbuf->data[sk->recvbuf->rdpos], &tok);
      if (0 > rv) {
           fprintf(stderr,
-                  "wscat: failed tokenising HTTP header: 0x%x\n",
+                  "%s: failed tokenising HTTP header: 0x%x\n",
+                  bin,
                   wsd_errno);
 
           goto error;
@@ -389,7 +507,8 @@ wssk_http_recv(sk_t *sk)
 
           if (0 > parse_header_field(&tok, &hreq)) {
                fprintf(stderr,
-                       "wscat: failed parsing HTTP header field: 0x%x\n",
+                       "%s: failed parsing HTTP header field: 0x%x\n",
+                       bin,
                        wsd_errno);
 
                goto error;
@@ -678,7 +797,11 @@ skb_put_http_req(skb_t *buf, http_req_t *req)
      skb_put_strn(buf, "Host: ", 6);
      skb_put_chunk(buf, req->host);
      skb_put_strn(buf, "\r\n", 2);
-     skb_put_strn(buf, "Origin: http://", 15);
+
+     if (wsd_cfg->tls)
+          skb_put_strn(buf, "Origin: https://", 16);
+     else
+          skb_put_strn(buf, "Origin: http://", 15);
      skb_put_chunk(buf, req->origin);
      skb_put_strn(buf, "\r\n", 2);
 
@@ -706,7 +829,7 @@ skb_put_http_req(skb_t *buf, http_req_t *req)
 void
 print_help(const char *bin)
 {
-     printf("Usage: %s [OPTIONS]... [HOST [PORT]]\n", bin);
+     printf("Usage: %s [OPTIONS]... [URI]\n", bin);
      fputs("\
 Write to and read from remote system HOST via websocket protocol.\n\n\
   -A, --user-agent    set User-Agent string in HTTP upgrade request\n\
@@ -718,6 +841,13 @@ Write to and read from remote system HOST via websocket protocol.\n\n\
   -R, --repeat-last   repeat last input as many times as specified\n\
   -N, --no-handshake  do not start or finish a closing handshake\n\
   -v, --verbose       be verbose (use multiple times for maximum effect)\n\
+"
+#ifdef HAVE_LIBSSL
+"\
+  -x, --no-check-certificate\n\
+                      do not check server certificate\n"
+#endif
+"\
   -h, --help          display this help and exit\n\n\
 ", stdout);
      printf("Version %s - Please send bug reports to: %s\n",
@@ -805,3 +935,182 @@ wssk_ws_start_closing_handshake()
      if (0 > wssk->proto->start_closing_handshake(wssk, WS_1000, true))
           done = true;
 }
+
+#ifdef HAVE_LIBSSL
+int
+wssk_tls_init(sk_t *sk, const char *hostname)
+{
+     if (!(sk->sslctx = SSL_CTX_new(TLS_client_method()))) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     if (!SSL_CTX_set_min_proto_version(sk->sslctx, TLS1_VERSION)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     SSL_CTX_set_options(sk->sslctx, SSL_OP_ALL | SSL_OP_SINGLE_DH_USE);
+     if (!SSL_CTX_set_default_verify_paths(sk->sslctx)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     // TODO Could set cipher list here
+
+     int mode = SSL_VERIFY_PEER;
+     if (wsd_cfg->no_check_cert)
+          mode = SSL_VERIFY_NONE;
+     SSL_CTX_set_verify(sk->sslctx, mode, NULL);
+
+     if (!(sk->ssl = SSL_new(sk->sslctx))) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+     SSL_set_connect_state(sk->ssl);
+     if (0 >= SSL_set1_host(sk->ssl, hostname)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+     SSL_set_hostflags(sk->ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+     if (!SSL_set_fd(sk->ssl, sk->fd)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+     if (!SSL_set_tlsext_host_name(sk->ssl, hostname)) {
+          ERR_print_errors_fp(stderr);
+          return (-1);
+     }
+
+     sk->ops->read = wssk_tls_handshake_read;
+     sk->ops->write = wssk_tls_handshake_write;
+     
+     return 0;
+}
+
+int
+wssk_tls_handshake_read(sk_t *sk)
+{
+     turn_off_events(sk, EPOLLIN);
+     return wssk_tls_handshake(sk);
+}
+
+int
+wssk_tls_handshake_write(sk_t *sk)
+{
+     turn_off_events(sk, EPOLLOUT);
+     return wssk_tls_handshake(sk);
+}
+
+int
+wssk_tls_handshake(sk_t *sk)
+{
+     int ret;
+     if (0 >= (ret = SSL_do_handshake(sk->ssl))) {
+          int rv = SSL_get_error(sk->ssl, ret);
+          if (rv == SSL_ERROR_WANT_READ)
+               turn_on_events(sk, EPOLLIN);
+          else if (rv == SSL_ERROR_WANT_WRITE)
+               turn_on_events(sk, EPOLLOUT);
+          else {
+               print_tls_error();
+               return (-1);
+          }
+     } else {
+          if (LOG_VERBOSE <= wsd_cfg->verbose)
+               fprintf(stderr, "%s: TLS negotiated\n", bin);
+          sk->ops->read = wssk_tls_read;
+          sk->ops->write = wssk_tls_write;
+          if (0 > create_http_req(sk))
+               return (-1);
+          turn_on_events(sk, EPOLLOUT|EPOLLIN);
+     }
+     return 0;
+}
+
+int
+wssk_tls_read(sk_t *sk)
+{
+     A(0 <= sk->fd);
+
+     if (0 == skb_wrsz(sk->recvbuf)) {
+          turn_off_events(sk, EPOLLIN);
+          wsd_errno = WSD_EAGAIN;
+          return (-1);
+     }
+
+     A(0 < skb_wrsz(sk->recvbuf));
+     int len = SSL_read(sk->ssl,
+                        &sk->recvbuf->data[sk->recvbuf->wrpos],
+                        skb_wrsz(sk->recvbuf));
+
+     if (len > 0) {
+          sk->recvbuf->wrpos += len;
+          return 0;
+     }
+
+     int rv = SSL_get_error(sk->ssl, len);
+     if (rv == SSL_ERROR_WANT_READ) {
+          /* Noop - try again. */
+          return 0;
+     } else if (rv == SSL_ERROR_WANT_WRITE) {
+          if (LOG_VERBOSE <= wsd_cfg->verbose)
+               fprintf(stderr, "%s: TLS renegotiation upon read\n", bin);
+          sk->ops->read = wssk_tls_handshake_read;
+          sk->ops->write = wssk_tls_handshake_write;
+          turn_on_events(sk, EPOLLOUT);
+          return 0;
+     }
+
+     print_tls_error();
+     return (-1);
+}
+
+int
+wssk_tls_write(sk_t *sk)
+{
+     if (0 == skb_rdsz(sk->sendbuf)) {
+          turn_off_events(sk, EPOLLOUT);
+          wsd_errno = WSD_EAGAIN;
+          return (-1);
+     }
+
+     A(0 < skb_rdsz(sk->sendbuf));
+     int len = SSL_write(sk->ssl,
+                         &sk->sendbuf->data[sk->sendbuf->rdpos],
+                         skb_rdsz(sk->sendbuf));
+
+     if (len > 0) {
+          sk->sendbuf->rdpos += len;
+          skb_compact(sk->sendbuf);
+          return 0;
+     }
+
+     int rv = SSL_get_error(sk->ssl, len);
+     if (rv == SSL_ERROR_WANT_WRITE) {
+          /* Noop - try again. */
+          return 0;
+     } else if (rv == SSL_ERROR_WANT_READ) {
+          if (LOG_VERBOSE <= wsd_cfg->verbose)
+               fprintf(stderr, "%s: TLS renegotiation upon write\n", bin);
+          sk->ops->read = wssk_tls_handshake_read;
+          sk->ops->write = wssk_tls_handshake_write;
+          turn_on_events(sk, EPOLLIN);
+          return 0;
+     }
+
+     print_tls_error();
+     return (-1);
+}
+
+void
+print_tls_error()
+{
+     unsigned long code;
+     while (0 != (code = ERR_get_error()))
+          fprintf(stderr,
+                  "%s: %s\n",
+                  bin,
+                  ERR_error_string(code, NULL));
+}
+#endif /* #ifdef HAVE_LIBSSL */

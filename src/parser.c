@@ -206,7 +206,7 @@ parse_request_line(chunk_t *tok, http_req_t *req)
 }
 
 #define ASSIGN(to)                              \
-     to.p = tok->p + len;               \
+     to.p = tok->p + len;                       \
      to.len = tok->len - len;
 
 #define CMP(to, to_len)                         \

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2014-2017 Michael Goldschmidt
+ *  Copyright (C) 2014-2018 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -21,6 +21,8 @@
 #include <errno.h>
 #include <string.h>
 #include <netdb.h>
+#include <unistd.h>
+#include <syslog.h>
 #include <sys/epoll.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -44,6 +46,7 @@
 
 extern unsigned int wsd_errno;
 extern const wsd_config_t *wsd_cfg;
+extern struct list_head *sk_list;
 extern sk_t *pp2sk;
 
 static const char *FLD_SEC_WS_VER_VAL = "13";
@@ -273,17 +276,17 @@ int
 sock_open()
 {
      AZ(pp2sk);
-     pp2sk = malloc(sizeof(sk_t));
-     if (!(pp2sk)) {
+     if (!(pp2sk = malloc(sizeof(sk_t)))) {
           wsd_errno = WSD_ENOMEM;
-          goto error;
+          return (-1);
      }
      memset(pp2sk, 0, sizeof(sk_t));
 
      int fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
      if (0 > fd) {
+          free(pp2sk);
           wsd_errno = WSD_CHECKERRNO;
-          goto error;
+          return (-1);
      }
 
      struct addrinfo hints, *res;
@@ -296,9 +299,7 @@ sock_open()
                           &hints,
                           &res);
      if (0 > rv) {
-          if (LOG_VVVERBOSE <= wsd_cfg->verbose)
-               printf("\tcannot resolve %s\n", gai_strerror(rv));
-
+          syslog(LOG_ERR, "%s: %s", gai_strerror(rv), wsd_cfg->fwd_hostname);
           wsd_errno = WSD_CHECKERRNO;
           goto error;
      }
@@ -311,9 +312,6 @@ sock_open()
      rv = connect(fd, res->ai_addr, res->ai_addrlen);
      freeaddrinfo(res);
      if (0 > rv && EINPROGRESS != errno) {
-          if (LOG_VVVERBOSE <= wsd_cfg->verbose)
-               printf("\tconnect: %s\n", strerror(errno));
-
           wsd_errno = WSD_EBADREQ;
           goto error;
      }
@@ -325,17 +323,15 @@ sock_open()
      pp2sk->ops->close = pp2_close;
      pp2sk->proto->decode_frame = pp2_decode_frame;
      pp2sk->proto->encode_frame = pp2_encode_frame;
-
+     list_add_tail(&pp2sk->sk_node, sk_list);
      AZ(register_for_events(pp2sk));
-
      return 0;
 
 error:
-     if (pp2sk) {
-          sock_destroy(pp2sk);
-          free(pp2sk);
-          pp2sk = NULL;
-     }
+     AZ(close(fd));
+     sock_destroy(pp2sk);
+     free(pp2sk);
+     pp2sk = NULL;
 
      return (-1);
 }

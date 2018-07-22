@@ -9,6 +9,7 @@
 *.sub
 *.log
 *.trs
+*.gz
 TAGS
 Makefile
 configure
@@ -33,3 +34,4 @@ test/.deps
 autom4te.cache
 aclocal.m4
 test-driver
+uri

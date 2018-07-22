@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2014-2017 Michael Goldschmidt
+ *  Copyright (C) 2014-2018 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -53,7 +53,7 @@ main(int argc, char **argv)
      int opt;
      int pidfd;
      int port_arg = DEFAULT_LISTENING_PORT;
-     int no_fork_arg = 0;
+     bool no_fork_arg = false;
      int idle_timeout_arg = DEFAULT_IDLE_TIMEOUT;
      int verbose_arg = 0;
      const char *fwd_port_arg = DEFAULT_FORWARD_PORT;
@@ -79,7 +79,7 @@ main(int argc, char **argv)
                fwd_port_arg = optarg;
                break;
           case 'd':
-               no_fork_arg = 1;
+               no_fork_arg = true;
                break;
           case 'v':
                verbose_arg++;
@@ -126,7 +126,10 @@ main(int argc, char **argv)
                exit(EXIT_FAILURE);
           }
 
-          AZ(fchown(pidfd, pwent->pw_uid, pwent->pw_gid));
+          if (0 > fchown(pidfd, pwent->pw_uid, pwent->pw_gid)) {
+               perror(argv[0]);
+               exit(EXIT_FAILURE);
+          }
      }
 
      wsd_config_t cfg;
@@ -154,7 +157,7 @@ main(int argc, char **argv)
           umask(0);
 
           openlog(ident, LOG_PID, LOG_USER);
-          syslog(LOG_INFO, "starting");
+          syslog(LOG_INFO, "Starting");
 
           if (!cfg.no_fork) {
                ERREXIT(0 > setsid(), "setsid");
@@ -203,13 +206,10 @@ main(int argc, char **argv)
           int rv = wschild_main(&cfg);
 
           AZ(close(cfg.lfd));
-          
-          syslog(LOG_INFO, "stopped");
-          closelog();
-
           if (cfg.pidfilename)
                AZ(unlink(cfg.pidfilename));
-
+          syslog(LOG_INFO, "Stopped");
+          closelog();
           exit(rv);
      }
 

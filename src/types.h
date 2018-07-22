@@ -1,12 +1,16 @@
 #ifndef __TYPES_H__
 #define __TYPES_H__
 
+#include "config.h"
 #include <stdbool.h>
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#ifdef HAVE_LIBSSL
+#include <openssl/ssl.h>
+#endif
 #include "list.h"
 
 #define ALERT(func, file, line)                 \
@@ -76,7 +80,7 @@ struct sk;
 typedef struct {
      unsigned int rdpos;
      unsigned int wrpos;
-     char         data[131072];
+     char         data[524288];
 } skb_t;
 
 struct proto;
@@ -101,13 +105,17 @@ struct sk {
      struct timespec    ts_closing_handshake_start;
      struct sockaddr_in src_addr;        /* Source address iff socket        */
      struct sockaddr_in dst_addr;        /* Destination address iff socket   */
+#ifdef HAVE_LIBSSL
+     SSL_CTX           *sslctx;
+     SSL               *ssl;
+#endif
 };
 typedef struct sk sk_t;
 
 struct proto {
-     int (*decode_handshake)(sk_t *sk, http_req_t *req); /* Decode handshake */
-     int (*decode_frame)(sk_t *sk);                 /* Decode single frame   */
-     int (*encode_frame)(sk_t *sk, wsframe_t *wsf); /* Encode single frame   */
+     int (*decode_handshake)(sk_t *sk, http_req_t *req);
+     int (*decode_frame)(sk_t *sk);                 /* Decodes single frame  */
+     int (*encode_frame)(sk_t *sk, wsframe_t *wsf); /* Encodes single frame  */
      int (*start_closing_handshake)(sk_t *sk, int status, bool mask);
 };
 
@@ -127,9 +135,17 @@ typedef struct {
      char       *fwd_hostname;
      const char *pidfilename;
      int         verbose;
-     int         no_fork;      /* Does not fork, stays attached to terminal  */
+     bool        no_fork;      /* Does not fork, stays attached to terminal  */
      int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
      int         closing_handshake_timeout;
+     char       *user_agent;
+     char       *sec_ws_proto;
+     char       *sec_ws_ver;
+     char       *sec_ws_key;
+#ifdef HAVE_LIBSSL
+     bool        tls;          /* TLS requested                              */
+     bool        no_check_cert;/* TLS certificate checking not requested     */
+#endif
 } wsd_config_t;
 
 #endif /* #ifndef __TYPES_H__ */

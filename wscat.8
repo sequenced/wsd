@@ -1,11 +1,10 @@
-.TH wscat 8 "August 27th, 2017" 0.22
+.TH wscat 8 "July 10th, 2018" 0.23
 .SH NAME
 wscat \- write to and read from websocket
 .SH SYNOPSIS
 .SP
 .B wscat
-[OPTIONS]
-.I [HOST[PORT]]
+[OPTIONS] [URI]
 .SH DESCRIPTION
 The
 .B wscat
@@ -39,8 +38,35 @@ Repeats last input as many times as specified. The last input is the input that 
 .IP "-v, --verbose"
 Enables diagnostic information on standard error. Use this option multiple times for maximum effect.
 .TP
+.IP "-x, --no-check-certificate"
+Does not check a server's certificate against available certificate authorities and does not verify that a hostname matches a common name presented by the certificate. Use this option only if you do not care about a server's authenticity.
+.TP
 .IP "-h, --help"
 Displays help and exits.
+.SH USAGE
+.B wscat
+expects a Uniform Resource Identifier (URI) for the remote system as defined in RFC 3986. For example, if the remote system offers a plaintext websocket on port 80 then use:
+
+.EX
+wscat ws://example.com
+.EE
+
+If on the other hand the remote system offers an encrypted websocket on port 443 then use:
+
+.EX
+wscat wss://example.com
+.EE
+
+If a websocket in either case is offered on a non-standard port then
+.B wscat
+can be told so by appending the port number:
+
+.EX
+wscat ws://example:1234
+.EE
+
+.B wscat
+can only communicate with an encrypted websocket if your site has a resonably recent version of OpenSSL library installed. If no URI is specified at all then the command assumes a plaintext websocket at port 80 on localhost.
 .SH BUGS
 Please report to bugs@sequencedsystems.com.
 .SH "SEE ALSO"

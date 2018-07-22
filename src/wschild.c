@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2014-2017 Michael Goldschmidt
+ *  Copyright (C) 2014-2018 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -46,13 +46,15 @@
 
 #define DEFAULT_TIMEOUT 128
 
+extern bool done;
+
 DEFINE_HASHTABLE(sk_hash, 4);
 const wsd_config_t *wsd_cfg = NULL;
 int epfd = -1;
 unsigned int wsd_errno = WSD_CHECKERRNO;
+struct list_head *sk_list = NULL;                    /* List of open sockets */
 
-static struct list_head *work_list = NULL;
-static struct list_head *sk_list = NULL;
+static struct list_head *work_list = NULL;           /* List of pending work */
 
 static void sigterm(int sig);
 static int sock_accept(int lfd);
@@ -62,6 +64,9 @@ static unsigned long int hash(struct sockaddr_in *saddr);
 static void list_init(struct list_head **list);
 static int on_iteration(const struct timespec *now);
 static void check_timeouts_for_each(const struct timespec *now);
+static void check_timeouts(sk_t *sk,
+                           const struct timespec *now,
+                           const int timeout);
 static void try_recv();
 static int check_closing_handshake_timeout(const sk_t *sk,
                                            const struct timespec *now,
@@ -104,10 +109,15 @@ wschild_main(const wsd_config_t *cfg)
 
      int rv = event_loop(on_iteration, post_read, DEFAULT_TIMEOUT);
 
-     /* TODO Close open sockets */
+     int num = 0;
+     sk_t *pos = NULL, *k = NULL;
+     list_for_each_entry_safe(pos, k, sk_list, sk_node) {
+          pos->ops->close(pos);
+          num++;
+     }
+     syslog(LOG_INFO, "closed %d open socket(s)", num);
 
      AZ(close(epfd));
-
      return rv;
 }
 
@@ -123,39 +133,30 @@ check_timeouts_for_each(const struct timespec *now)
 {
      sk_t *pos = NULL, *k = NULL;
      list_for_each_entry_safe(pos, k, sk_list, sk_node) {
+          check_timeouts(pos, now, wsd_cfg->idle_timeout);
+     }
+}
 
-          int rv = check_idle_timeout(pos, now, wsd_cfg->idle_timeout);
-
-          if (1 == rv) {
-
-               if (0 > pos->proto->start_closing_handshake(pos,
-                                                           WS_1000,
-                                                           false)) {
-
-                    /* Failed to start closing handshake, close socket now */
-                    AZ(pos->ops->close(pos));
-
-               } else {
-                    
-                    /* Started closing handshake, arm timeout. */
-                    pos->ts_closing_handshake_start.tv_sec = now->tv_sec;
-                    pos->ts_closing_handshake_start.tv_nsec = now->tv_nsec;
-
-               }
+void
+check_timeouts(sk_t *sk,
+               const struct timespec *now,
+               const int timeout)
+{
+     if (check_idle_timeout(sk, now, timeout)) {
+          if (!sk->proto->start_closing_handshake
+              || 0 > sk->proto->start_closing_handshake(sk, WS_1000, false)) {
+               /* Closing handshake failed or not required: close socket */
+               AZ(sk->ops->close(sk));
+          } else {
+               /* Started closing handshake, arm timeout. */
+               sk->ts_closing_handshake_start.tv_sec = now->tv_sec;
+               sk->ts_closing_handshake_start.tv_nsec = now->tv_nsec;
           }
+     }
 
-          rv = check_closing_handshake_timeout(pos,
-                                               now,
-                                               wsd_cfg->closing_handshake_timeout);
-          if (1 == rv) {
-
-               /* 
-                * Closing handshake did not complete
-                * in time, close socket now.
-                */
-               AZ(pos->ops->close(pos));
-
-          }
+     if (check_closing_handshake_timeout(sk, now, timeout)) {
+          /* Closing handshake timed out: close socket */
+          AZ(sk->ops->close(sk));
      }
 }
 
@@ -243,21 +244,19 @@ sock_close(sk_t *sk)
 int
 post_read(sk_t *sk)
 {
-     sk_t *pos;
+     sk_t *pos = NULL;
      list_for_each_entry(pos, work_list, work_node) {
           if (pos->fd == sk->fd)
                return 0;
      }
-
      list_add_tail(&sk->work_node, work_list);
-
      return 0;
 }
 
 void
 sigterm(int sig)
 {
-     // TODO
+     done = true;
 }
 
 int
