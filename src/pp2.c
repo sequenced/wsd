@@ -308,7 +308,7 @@ pp2_close(sk_t *sk) {
           printf("%s:%d: %s: fd=%d\n", __FILE__, __LINE__, __func__, sk->fd);
      AZ(close(sk->fd));
      list_del(&sk->sk_node);
-     sock_destroy(sk);
+     sk_destroy(sk);
      free(sk);
      pp2sk = NULL;
      return 0;

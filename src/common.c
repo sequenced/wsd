@@ -38,8 +38,8 @@ extern const wsd_config_t *wsd_cfg;
 bool done = false;
 unsigned int num = 0;
 
-static int sock_read(sk_t *sk);
-static int sock_write(sk_t *sk);
+static int sk_read(sk_t *sk);
+static int sk_write(sk_t *sk);
 static int on_write(sk_t *sk, const struct timespec *now);
 static int on_read(sk_t *sk,
                    int (*post_read)(sk_t *sk),
@@ -50,7 +50,6 @@ inline void
 turn_off_events(sk_t *sk, unsigned int events)
 {
      sk->events &= ~events;
-
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
      ev.events = sk->events;
@@ -62,7 +61,6 @@ inline void
 turn_on_events(sk_t *sk, unsigned int events)
 {
      sk->events |= events;
-
      struct epoll_event ev;
      memset(&ev, 0, sizeof(ev));
      ev.events = sk->events;
@@ -132,7 +130,7 @@ skb_put_strn(skb_t *b, const char *s, size_t n) {
 }
 
 int
-sock_init(sk_t *sk, int fd, unsigned long int hash)
+sk_init(sk_t *sk, int fd, unsigned long int hash)
 {
      sk->proto = malloc(sizeof(struct proto));
      if (!sk->proto) {
@@ -161,18 +159,16 @@ sock_init(sk_t *sk, int fd, unsigned long int hash)
           return (-1);
      }
      memset(sk->recvbuf, 0, sizeof(skb_t));
-
      sk->hash = hash;
      sk->fd = fd;
      sk->events = EPOLLIN | EPOLLPRI | EPOLLRDHUP;
-     sk->ops->read = sock_read;
-     sk->ops->write = sock_write;
-
+     sk->ops->read = sk_read;
+     sk->ops->write = sk_write;
      return 0;
 }
 
 void
-sock_destroy(sk_t *sk)
+sk_destroy(sk_t *sk)
 {
      if (sk->ops)
           free(sk->ops);
@@ -245,7 +241,7 @@ on_epoll_event(struct epoll_event *evt,
 }
 
 int
-sock_read(sk_t *sk)
+sk_read(sk_t *sk)
 {
      A(0 <= sk->fd);
 
@@ -286,7 +282,7 @@ sock_read(sk_t *sk)
 }
 
 int
-sock_write(sk_t *sk)
+sk_write(sk_t *sk)
 {
      if (0 == skb_rdsz(sk->sendbuf)) {
           turn_off_events(sk, EPOLLOUT);

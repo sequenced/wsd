@@ -56,7 +56,7 @@ static bool is_valid_proto(http_req_t *hr);
 static bool is_valid_ver(http_req_t *hr);
 static int prepare_handshake(skb_t *b, http_req_t *hr);
 static int generate_accept_val(skb_t *b, http_req_t *hr);
-static int sock_open(const char *hostname, const char *service);
+static int sk_open(const char *hostname, const char *service);
 
 int
 ws_recv(sk_t *sk)
@@ -77,7 +77,7 @@ ws_recv(sk_t *sk)
           int retries = wsd_cfg->fwd_hostname_num;
           while (retries--) {
                printf("Trying %s\n", wsd_cfg->fwd_hostname[num]);
-               rv = sock_open(wsd_cfg->fwd_hostname[num], wsd_cfg->fwd_port);
+               rv = sk_open(wsd_cfg->fwd_hostname[num], wsd_cfg->fwd_port);
                if (0 > rv && wsd_errno == WSD_EAI) {
                     next_host();
                     continue;
@@ -285,7 +285,7 @@ generate_accept_val(skb_t *b, http_req_t *hr)
 }
 
 int
-sock_open(const char *hostname, const char *service)
+sk_open(const char *hostname, const char *service)
 {
      AZ(pp2sk);
      if (!(pp2sk = malloc(sizeof(sk_t)))) {
@@ -330,7 +330,7 @@ sock_open(const char *hostname, const char *service)
           goto error;
      }
 
-     if (0 > sock_init(pp2sk, fd, -1ULL))
+     if (0 > sk_init(pp2sk, fd, -1ULL))
           goto error;
 
      pp2sk->ops->recv = pp2_recv;
@@ -343,7 +343,7 @@ sock_open(const char *hostname, const char *service)
 
 error:
      AZ(close(fd));
-     sock_destroy(pp2sk);
+     sk_destroy(pp2sk);
      free(pp2sk);
      pp2sk = NULL;
 

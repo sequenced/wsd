@@ -32,8 +32,8 @@
      dst->ts_last_io.tv_nsec = src->tv_nsec;
 #define unmask mask
 
-void sock_destroy(sk_t *sk);
-int sock_init(sk_t *sk, int fd, unsigned long int hash);
+void sk_destroy(sk_t *sk);
+int sk_init(sk_t *sk, int fd, unsigned long int hash);
 void turn_on_events(sk_t *sk, unsigned int events);
 void turn_off_events(sk_t *sk, unsigned int events);
 int on_epoll_event(struct epoll_event *evt,

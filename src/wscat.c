@@ -388,8 +388,8 @@ wssk_init()
      }
      memset(wssk, 0, sizeof(sk_t));
 
-     if (0 > sock_init(wssk, fd, 0ULL)) {
-          fprintf(stderr, "%s: sock_init: 0x%x\n", bin, wsd_errno);
+     if (0 > sk_init(wssk, fd, 0ULL)) {
+          fprintf(stderr, "%s: sk_init: 0x%x\n", bin, wsd_errno);
           AZ(close(fd));
           return (-1);
      }
@@ -423,7 +423,7 @@ wssk_close(sk_t *sk) {
           SSL_shutdown(sk->ssl); /* Unidirectional shutdown only. */
 #endif
      AZ(close(sk->fd));
-     sock_destroy(sk);
+     sk_destroy(sk);
      free(sk);
 
      wssk = NULL;
@@ -444,7 +444,7 @@ stdin_close(sk_t *sk)
      }
      
      AZ(close(sk->fd));
-     sock_destroy(sk);
+     sk_destroy(sk);
      free(sk);
 
      fdin = NULL;
@@ -514,7 +514,7 @@ wssk_http_recv(sk_t *sk)
           exit(EXIT_FAILURE);
      }
      memset(fdin, 0, sizeof(sk_t));
-     AZ(sock_init(fdin, 0, 0ULL));
+     AZ(sk_init(fdin, 0, 0ULL));
      fdin->ops->recv = stdin_recv;
      fdin->ops->close = stdin_close;
      fdin->proto->decode_frame = stdin_decode_frame;
@@ -743,7 +743,7 @@ repeat_last()
 
      sk_t *sk = malloc(sizeof(sk_t));
      A(sk);
-     AZ(sock_init(sk, -1, 0ULL));
+     AZ(sk_init(sk, -1, 0ULL));
 
      int rv = 0;
      while (repeat_last_num) {
@@ -764,7 +764,7 @@ repeat_last()
                repeat_last_num = 0;
      }
 
-     sock_destroy(sk);
+     sk_destroy(sk);
      free(sk);
 
      return (0 == repeat_last_num ? 0 : rv);

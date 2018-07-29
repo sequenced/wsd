@@ -46,7 +46,7 @@
 
 static const char *ident = "wsd";
 static int drop_priv(uid_t new_uid);
-static int listen_sock_bind(const int port);
+static int listen_sk_bind(const int port);
 static void print_help();
 
 int
@@ -198,9 +198,9 @@ main(int argc, char **argv)
                close(STDERR_FILENO);
           }
 
-          cfg.lfd = listen_sock_bind(cfg.port);
+          cfg.lfd = listen_sk_bind(cfg.port);
           if (0 > cfg.lfd) {
-               perror("listen_sock_bind");
+               perror("listen_sk_bind");
                exit(EXIT_FAILURE);
           }
 
@@ -239,7 +239,7 @@ drop_priv(uid_t new_uid)
 }
 
 int
-listen_sock_bind(const int port)
+listen_sk_bind(const int port)
 {
      int s;
 #ifdef SYS_LINUX

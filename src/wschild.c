@@ -57,8 +57,8 @@ struct list_head *sk_list = NULL;                    /* List of open sockets */
 static struct list_head *work_list = NULL;           /* List of pending work */
 
 static void sigterm(int sig);
-static int sock_accept(int lfd);
-static int sock_close(sk_t *sk);
+static int sk_accept(int lfd);
+static int sk_close(sk_t *sk);
 static int post_read(sk_t *sk);
 static unsigned long int hash(struct sockaddr_in *saddr);
 static void list_init(struct list_head **list);
@@ -95,14 +95,14 @@ wschild_main(const wsd_config_t *cfg)
      }
      memset(lsk, 0, sizeof(sk_t));
 
-     if (0 > sock_init(lsk, wsd_cfg->lfd, 0ULL)) {
+     if (0 > sk_init(lsk, wsd_cfg->lfd, 0ULL)) {
           free(lsk);
           return (-1);
      }
      
      lsk->events = EPOLLIN;
-     lsk->ops->accept = sock_accept;
-     lsk->ops->close = sock_close;
+     lsk->ops->accept = sk_accept;
+     lsk->ops->close = sk_close;
 
      AZ(listen(lsk->fd, 4));
      AZ(register_for_events(lsk));
@@ -211,7 +211,7 @@ try_recv()
 }
 
 int
-sock_close(sk_t *sk)
+sk_close(sk_t *sk)
 {
      if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
           printf("%s:%d: %s: hash=0x%lx, rdsz=%d, wrsz=%d, fd=%d\n",
@@ -235,7 +235,7 @@ sock_close(sk_t *sk)
      }
 
      AZ(close(sk->fd));
-     sock_destroy(sk);
+     sk_destroy(sk);
      free(sk);
 
      return 0;
@@ -260,7 +260,7 @@ sigterm(int sig)
 }
 
 int
-sock_accept(int lfd)
+sk_accept(int lfd)
 {
      sk_t *sk = malloc(sizeof(sk_t));
      if (!sk) {
@@ -288,7 +288,7 @@ sock_accept(int lfd)
           return (-1);
      }
 
-     if (0 > sock_init(sk, fd, hash(&sk->src_addr))) {
+     if (0 > sk_init(sk, fd, hash(&sk->src_addr))) {
           AZ(close(fd));
           free(sk);
           wsd_errno = WSD_CHECKERRNO;
@@ -296,7 +296,7 @@ sock_accept(int lfd)
      }
 
      sk->ops->recv = http_recv;
-     sk->ops->close = sock_close;
+     sk->ops->close = sk_close;
      sk->proto->decode_handshake = ws_decode_handshake;
 
      if (0 > register_for_events(sk)) {
