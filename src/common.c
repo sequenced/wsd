@@ -41,6 +41,9 @@ unsigned int num = 0;
 static int sock_read(sk_t *sk);
 static int sock_write(sk_t *sk);
 static int on_write(sk_t *sk, const struct timespec *now);
+static int on_read(sk_t *sk,
+                   int (*post_read)(sk_t *sk),
+                   const struct timespec *now);
 static void check_errno();
 
 inline void
@@ -196,6 +199,28 @@ on_write(sk_t *sk, const struct timespec *now)
 }
 
 int
+on_read(sk_t *sk, int (*post_read)(sk_t *sk), const struct timespec *now)
+{
+     A(!sk->close_on_write);
+     A(!sk->close);
+     int rv = sk->ops->read(sk);
+     ts_last_io_set(sk, now);
+     if (0 > rv && wsd_errno != WSD_EAGAIN) {
+          if (wsd_errno == WSD_CHECKERRNO)
+               check_errno(sk);
+          AZ(sk->ops->close(sk));
+     } else {
+          rv = (*post_read)(sk);
+          if (0 > rv && wsd_errno != WSD_EAGAIN && wsd_errno != WSD_EINPUT) {
+               AZ(sk->ops->close(sk));
+          } else if (sk->close) {
+               AZ(sk->ops->close(sk));
+          }
+     }
+     return rv;
+}
+
+int
 on_epoll_event(struct epoll_event *evt,
                int (*post_read)(sk_t *sk),
                const struct timespec *now)
@@ -203,30 +228,8 @@ on_epoll_event(struct epoll_event *evt,
      int rv = 0;
      sk_t *sk = (sk_t*)evt->data.ptr;
      A(sk->fd >= 0);
-
-     if (evt->events & EPOLLIN
-         || evt->events & EPOLLPRI) {
-
-          A(!sk->close_on_write);
-          A(!sk->close);
-
-          rv = sk->ops->read(sk);
-          ts_last_io_set(sk, now);
-          if (0 > rv && wsd_errno != WSD_EAGAIN) {
-               if (wsd_errno == WSD_CHECKERRNO)
-                    check_errno(sk);
-               AZ(sk->ops->close(sk));
-          } else {
-               rv = (*post_read)(sk);
-               if (0 > rv
-                   && wsd_errno != WSD_EAGAIN
-                   && wsd_errno != WSD_EINPUT) {
-                    AZ(sk->ops->close(sk));
-               } else if (sk->close) {
-                    AZ(sk->ops->close(sk));
-               }
-          }
-
+     if (evt->events & EPOLLIN || evt->events & EPOLLPRI) {
+          rv = on_read(sk, post_read, now);
      } else if (evt->events & EPOLLOUT) {
           rv = on_write(sk, now);
      } else if (evt->events & EPOLLERR
@@ -234,7 +237,6 @@ on_epoll_event(struct epoll_event *evt,
                 || evt->events & EPOLLRDHUP) {
           AZ(sk->ops->close(sk));
      }
-
      return rv;
 }
 
