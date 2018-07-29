@@ -1,0 +1,12 @@
+The wsd daemon terminates websockets and multiplexes their frames to
+some backend using proxy protocol 2 (PP2). At the websocket interface,
+it implements a practical subset of the websocket protocol as defined
+by RFC 6455. It is designed to be reasonably fast by minimising system
+calls, memory copying and runtime memory allocation.
+
+The wscat command writes to and reads from a remote system via web‐
+socket protocol RFC 6455. It reads from standard input and writes to
+standard output. The command can be used interactively and
+non-interactively.
+
+See wsd(8) and wscat(8).
