@@ -61,21 +61,21 @@ main(int argc, char **argv)
      const char *f_arg = DEFAULT_FORWARD_PORT;
      const char *u_arg = NULL;
      const char *p_arg = NULL;
-     unsigned int fwd_hostname_num = 0;
+     unsigned int h_arg_num = 0;
      char **h_arg = calloc(sizeof *h_arg, DEFAULT_MAX_HOSTNAMES);
      A(h_arg);
 
      while ((opt = getopt(argc, argv, "h:p:o:f:u:i:dv?")) != -1) {
           switch (opt) {
           case 'h':
-               if (fwd_hostname_num >= DEFAULT_MAX_HOSTNAMES) {
+               if (h_arg_num >= DEFAULT_MAX_HOSTNAMES) {
                     fprintf(stderr,
                             "%s: too many hostnames (maximum is %u)\n",
                             argv[0],
                             DEFAULT_MAX_HOSTNAMES);
                     exit(EXIT_FAILURE);
                }
-               h_arg[fwd_hostname_num++] = optarg;
+               h_arg[h_arg_num++] = optarg;
                break;
           case 'u':
                u_arg = optarg;
@@ -111,8 +111,8 @@ main(int argc, char **argv)
           }
      }
 
-     if (0 == fwd_hostname_num)
-          h_arg[fwd_hostname_num++] = DEFAULT_FORWARD_HOST;
+     if (0 == h_arg_num)
+          h_arg[h_arg_num++] = DEFAULT_FORWARD_HOST;
 
      if (NULL == u_arg)
           u_arg = "wsd";
@@ -149,7 +149,7 @@ main(int argc, char **argv)
      cfg.port = o_arg;
      cfg.fwd_port = strdup(f_arg);
      cfg.fwd_hostname = h_arg;
-     cfg.fwd_hostname_num = fwd_hostname_num;
+     cfg.fwd_hostname_num = h_arg_num;
      cfg.verbose = v_arg;
      cfg.no_fork = d_arg;
      cfg.pidfilename = p_arg;
