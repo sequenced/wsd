@@ -115,7 +115,7 @@ wschild_main(const wsd_config_t *cfg)
           pos->ops->close(pos);
           num++;
      }
-     syslog(LOG_INFO, "closed %d open socket(s)", num);
+     syslog(LOG_INFO, "Closed %d open socket(s)", num);
 
      AZ(close(epfd));
      return rv;
