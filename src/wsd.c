@@ -42,7 +42,7 @@
 #define DEFAULT_FORWARD_PORT              "6085"
 #define DEFAULT_FORWARD_HOST              "127.0.0.1"
 #define DEFAULT_LISTENING_PORT            6084
-#define DEFAULT_MAX_HOSTNAMES             4
+#define DEFAULT_MAX_HOSTNAMES             16
 
 static const char *ident = "wsd";
 static int drop_priv(uid_t new_uid);
@@ -54,17 +54,16 @@ main(int argc, char **argv)
 {
      int opt;
      int pidfd;
-     int port_arg = DEFAULT_LISTENING_PORT;
-     bool no_fork_arg = false;
-     int idle_timeout_arg = DEFAULT_IDLE_TIMEOUT;
-     int verbose_arg = 0;
-     const char *fwd_port_arg = DEFAULT_FORWARD_PORT;
-     const char *user_arg = NULL;
-     const char *pidfile_arg = NULL;
+     int o_arg = DEFAULT_LISTENING_PORT;
+     bool d_arg = false;
+     int i_arg = DEFAULT_IDLE_TIMEOUT;
+     int v_arg = 0;
+     const char *f_arg = DEFAULT_FORWARD_PORT;
+     const char *u_arg = NULL;
+     const char *p_arg = NULL;
      unsigned int fwd_hostname_num = 0;
-     char **fwd_hostname_arg = calloc(sizeof *fwd_hostname_arg,
-                                      DEFAULT_MAX_HOSTNAMES);
-     A(fwd_hostname_arg);
+     char **h_arg = calloc(sizeof *h_arg, DEFAULT_MAX_HOSTNAMES);
+     A(h_arg);
 
      while ((opt = getopt(argc, argv, "h:p:o:f:u:i:dv?")) != -1) {
           switch (opt) {
@@ -76,28 +75,28 @@ main(int argc, char **argv)
                             DEFAULT_MAX_HOSTNAMES);
                     exit(EXIT_FAILURE);
                }
-               fwd_hostname_arg[fwd_hostname_num++] = optarg;
+               h_arg[fwd_hostname_num++] = optarg;
                break;
           case 'u':
-               user_arg = optarg;
+               u_arg = optarg;
                break;
           case 'p':
-               pidfile_arg = optarg;
+               p_arg = optarg;
                break;
           case 'o':
-               port_arg = atoi(optarg);
+               o_arg = atoi(optarg);
                break;
           case 'f':
-               fwd_port_arg = optarg;
+               f_arg = optarg;
                break;
           case 'd':
-               no_fork_arg = true;
+               d_arg = true;
                break;
           case 'v':
-               verbose_arg++;
+               v_arg++;
                break;
           case 'i':
-               idle_timeout_arg = atoi(optarg);
+               i_arg = atoi(optarg);
                break;
           case '?':
                print_help(argv[0]);
@@ -113,14 +112,14 @@ main(int argc, char **argv)
      }
 
      if (0 == fwd_hostname_num)
-          fwd_hostname_arg[fwd_hostname_num++] = DEFAULT_FORWARD_HOST;
+          h_arg[fwd_hostname_num++] = DEFAULT_FORWARD_HOST;
 
-     if (NULL == user_arg)
-          user_arg = "wsd";
+     if (NULL == u_arg)
+          u_arg = "wsd";
 
      struct passwd *pwent;
-     if (NULL == (pwent = getpwnam(user_arg))) {
-          fprintf(stderr, "%s: unknown user: %s\n", argv[0], user_arg);
+     if (NULL == (pwent = getpwnam(u_arg))) {
+          fprintf(stderr, "%s: unknown user: %s\n", argv[0], u_arg);
           exit(EXIT_FAILURE);
      }
 
@@ -129,12 +128,12 @@ main(int argc, char **argv)
           exit(EXIT_FAILURE);
      }
 
-     if (pidfile_arg) {
-          pidfd = open(pidfile_arg,
+     if (p_arg) {
+          pidfd = open(p_arg,
                        O_CREAT|O_EXCL|O_WRONLY,
                        S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
           if (0 > pidfd) {
-               fprintf(stderr, "%s: cannot open: %s\n", argv[0], pidfile_arg);
+               fprintf(stderr, "%s: cannot open: %s\n", argv[0], p_arg);
                exit(EXIT_FAILURE);
           }
 
@@ -147,14 +146,14 @@ main(int argc, char **argv)
      wsd_config_t cfg;
      memset(&cfg, 0x0, sizeof(wsd_config_t));
      cfg.uid = pwent->pw_uid;
-     cfg.port = port_arg;
-     cfg.fwd_port = strdup(fwd_port_arg);
-     cfg.fwd_hostname = fwd_hostname_arg;
+     cfg.port = o_arg;
+     cfg.fwd_port = strdup(f_arg);
+     cfg.fwd_hostname = h_arg;
      cfg.fwd_hostname_num = fwd_hostname_num;
-     cfg.verbose = verbose_arg;
-     cfg.no_fork = no_fork_arg;
-     cfg.pidfilename = pidfile_arg;
-     cfg.idle_timeout = idle_timeout_arg;
+     cfg.verbose = v_arg;
+     cfg.no_fork = d_arg;
+     cfg.pidfilename = p_arg;
+     cfg.idle_timeout = i_arg;
      cfg.closing_handshake_timeout = DEFAULT_CLOSING_HANDSHAKE_TIMEOUT;
 
      pid_t pid = 0;
