@@ -194,7 +194,7 @@ pp2_encode_frame(sk_t *sk, wsframe_t *wsf)
      if (LOG_VVERBOSE <= wsd_cfg->verbose) {
           pp2_printf(stdout,
                      &pp2sk->sendbuf->data[pp2sk->sendbuf->wrpos -
-                                            PP2_HEADER_LEN]);
+                                           PP2_HEADER_LEN]);
      }
 
      unsigned int len = wsf->payload_len;

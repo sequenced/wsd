@@ -74,10 +74,9 @@ ws_recv(sk_t *sk)
 
      int rv;
      if (NULL == pp2sk) {
-          int retries = wsd_cfg->fwd_hostname_num;
+          int retries = wsd_cfg->fhostname_num;
           while (retries--) {
-               printf("Trying %s\n", wsd_cfg->fwd_hostname[num]);
-               rv = sk_open(wsd_cfg->fwd_hostname[num], wsd_cfg->fwd_port);
+               rv = sk_open(wsd_cfg->fhostname[num], wsd_cfg->fport);
                if (0 > rv && wsd_errno == WSD_EAI) {
                     next_host();
                     continue;

@@ -205,7 +205,7 @@ on_read(sk_t *sk, int (*post_read)(sk_t *sk), const struct timespec *now)
           if (wsd_errno == WSD_CHECKERRNO)
                if (0 == check_errno(sk)) {
                     sk->retries++;
-                    if (sk->retries < wsd_cfg->fwd_hostname_num)
+                    if (sk->retries < wsd_cfg->fhostname_num)
                          return 0;
                }
           AZ(sk->ops->close(sk));
@@ -460,7 +460,14 @@ check_errno()
 inline void
 next_host()
 {
-     printf("num = %u\n", num);
-     if (++num >= wsd_cfg->fwd_hostname_num)
+     if (++num >= wsd_cfg->fhostname_num)
           num = 0;
+
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: trying host: %s\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 wsd_cfg->fhostname[num]);
+     }
 }

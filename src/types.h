@@ -132,12 +132,12 @@ struct ops {
 typedef struct {
      uid_t       uid;
      int         lfd;          /* Listening socket fd iff wsd                */
-     int         port;
-     char       *fwd_port;
-     char      **fwd_hostname;
-     uint8_t     fwd_hostname_num;
+     int         lport;        /* Listening port iff wsd                     */
+     char       *fport;        /* Forwarding port iff wsd                    */
+     char      **fhostname;    /* Forwarding hostname iff wsd                */
+     uint8_t     fhostname_num;/* Number of forwarding hostnames (-h options)*/
      const char *pidfilename;
-     int         verbose;
+     uint8_t     verbose;
      bool        no_fork;      /* Does not fork, stays attached to terminal  */
      int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
      int         closing_handshake_timeout;

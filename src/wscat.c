@@ -249,12 +249,12 @@ main(int argc, char **argv)
      A(wsd_cfg);
      memset(wsd_cfg, 0, sizeof(wsd_config_t));
      wsd_cfg->idle_timeout = idle_timeout_arg;
-     wsd_cfg->fwd_hostname = malloc(2);
-     A(wsd_cfg->fwd_hostname);
-     memset(wsd_cfg->fwd_hostname, 0, 2);
-     wsd_cfg->fwd_hostname[0] = malloc(strlen(fwd_hostname_arg) + 1);
-     strcpy(wsd_cfg->fwd_hostname[0], fwd_hostname_arg);
-     wsd_cfg->fwd_port = fwd_port_arg;
+     wsd_cfg->fhostname = malloc(2);
+     A(wsd_cfg->fhostname);
+     memset(wsd_cfg->fhostname, 0, 2);
+     wsd_cfg->fhostname[0] = malloc(strlen(fwd_hostname_arg) + 1);
+     strcpy(wsd_cfg->fhostname[0], fwd_hostname_arg);
+     wsd_cfg->fport = fwd_port_arg;
      wsd_cfg->verbose = verbose_arg;
      wsd_cfg->lfd = -1;
      wsd_cfg->user_agent = user_agent_arg;
@@ -293,7 +293,7 @@ main(int argc, char **argv)
      AZ(close(epfd));
      free(fwd_hostname_arg);
      free(fwd_port_arg);
-     free(wsd_cfg->fwd_hostname);
+     free(wsd_cfg->fhostname);
      free(wsd_cfg);
      return rv;
 }
@@ -309,10 +309,10 @@ create_http_req(sk_t *sk)
      req.req_target.len = 1;
      req.http_ver.p = "HTTP/1.1";
      req.http_ver.len = 8;
-     req.host.p = strdup(wsd_cfg->fwd_hostname[0]);
-     req.host.len = strlen(wsd_cfg->fwd_hostname[0]);
-     req.origin.p = strdup(wsd_cfg->fwd_hostname[0]);
-     req.origin.len = strlen(wsd_cfg->fwd_hostname[0]);
+     req.host.p = strdup(wsd_cfg->fhostname[0]);
+     req.host.len = strlen(wsd_cfg->fhostname[0]);
+     req.origin.p = strdup(wsd_cfg->fhostname[0]);
+     req.origin.len = strlen(wsd_cfg->fhostname[0]);
      if (wsd_cfg->sec_ws_proto) {
           req.sec_ws_proto.p = strdup(wsd_cfg->sec_ws_proto);
           req.sec_ws_proto.len = strlen(wsd_cfg->sec_ws_proto);
@@ -348,10 +348,7 @@ wssk_init()
      memset(&hints, 0, sizeof(struct addrinfo));
      hints.ai_family = AF_INET;
      hints.ai_socktype = SOCK_STREAM;
-     int rv = getaddrinfo(wsd_cfg->fwd_hostname[0],
-                          wsd_cfg->fwd_port,
-                          &hints,
-                          &res);
+     int rv = getaddrinfo(wsd_cfg->fhostname[0], wsd_cfg->fport, &hints, &res);
      if (0 > rv) {
           fprintf(stderr, "%s: cannot resolve: %s\n", bin, gai_strerror(rv));
           AZ(close(fd));
@@ -395,7 +392,7 @@ wssk_init()
      }
 
 #ifdef HAVE_LIBSSL
-     if (wsd_cfg->tls && 0 > wssk_tls_init(wssk, wsd_cfg->fwd_hostname[0])) {
+     if (wsd_cfg->tls && 0 > wssk_tls_init(wssk, wsd_cfg->fhostname[0])) {
           fprintf(stderr, "%s: wssk_tls_init", bin);
           AZ(close(fd));
           return (-1);

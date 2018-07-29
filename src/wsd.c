@@ -146,10 +146,10 @@ main(int argc, char **argv)
      wsd_config_t cfg;
      memset(&cfg, 0x0, sizeof(wsd_config_t));
      cfg.uid = pwent->pw_uid;
-     cfg.port = o_arg;
-     cfg.fwd_port = strdup(f_arg);
-     cfg.fwd_hostname = h_arg;
-     cfg.fwd_hostname_num = h_arg_num;
+     cfg.lport = o_arg;
+     cfg.fport = strdup(f_arg);
+     cfg.fhostname = h_arg;
+     cfg.fhostname_num = h_arg_num;
      cfg.verbose = v_arg;
      cfg.no_fork = d_arg;
      cfg.pidfilename = p_arg;
@@ -198,7 +198,7 @@ main(int argc, char **argv)
                close(STDERR_FILENO);
           }
 
-          cfg.lfd = listen_sk_bind(cfg.port);
+          cfg.lfd = listen_sk_bind(cfg.lport);
           if (0 > cfg.lfd) {
                perror("listen_sk_bind");
                exit(EXIT_FAILURE);
@@ -216,9 +216,9 @@ main(int argc, char **argv)
           AZ(close(cfg.lfd));
           if (cfg.pidfilename)
                AZ(unlink(cfg.pidfilename));
-          free(cfg.fwd_port);
-          free(cfg.fwd_hostname[0]);
-          free(cfg.fwd_hostname);
+          free(cfg.fport);
+          free(cfg.fhostname[0]);
+          free(cfg.fhostname);
           syslog(LOG_INFO, "Stopped");
           closelog();
           exit(rv);
