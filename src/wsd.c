@@ -18,6 +18,8 @@
  *
  */
 
+#include "config.h"
+
 #include <stdlib.h>
 #include <syslog.h>
 #include <stdio.h>
@@ -32,7 +34,6 @@
 #include <sys/stat.h>
 #include <netinet/in.h>
 
-#include "config.h"
 #include "wschild.h"
 #include "common.h"
 

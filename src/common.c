@@ -44,7 +44,7 @@ static int on_write(sk_t *sk, const struct timespec *now);
 static int on_read(sk_t *sk,
                    int (*post_read)(sk_t *sk),
                    const struct timespec *now);
-static void check_errno();
+static int check_errno();
 
 inline void
 turn_off_events(sk_t *sk, unsigned int events)
@@ -207,7 +207,11 @@ on_read(sk_t *sk, int (*post_read)(sk_t *sk), const struct timespec *now)
      ts_last_io_set(sk, now);
      if (0 > rv && wsd_errno != WSD_EAGAIN) {
           if (wsd_errno == WSD_CHECKERRNO)
-               check_errno(sk);
+               if (0 == check_errno(sk)) {
+                    sk->retries++;
+                    if (sk->retries < wsd_cfg->fwd_hostname_num)
+                         return 0;
+               }
           AZ(sk->ops->close(sk));
      } else {
           rv = (*post_read)(sk);
@@ -399,18 +403,14 @@ event_loop(int (*on_iteration)(const struct timespec *now),
 
           int n;
           for (n = 0; n < nfd; n++) {
-
                sk_t *sk = (sk_t*)evs[n].data.ptr;
                if (sk->fd == wsd_cfg->lfd) {
                     AZ(sk->ops->accept(sk->fd));
                     continue;
                }
-
                rv = on_epoll_event(&evs[n], post_read, now);
-
           }
      }
-
      free(now);
      return rv;
 }
@@ -448,19 +448,23 @@ has_timed_out(const struct timespec *instant,
      return (diff_in_millis > timeout ? true : false);
 }
 
-inline void
+inline int
 check_errno()
 {
      if (errno == ECONNREFUSED
          || errno == EAGAIN
          || errno == ENETUNREACH
-         || errno == ETIMEDOUT)
+         || errno == ETIMEDOUT) {
           next_host();
+          return 0;
+     }
+     return (-1);
 }
 
 inline void
 next_host()
 {
+     printf("num = %u\n", num);
      if (++num >= wsd_cfg->fwd_hostname_num)
           num = 0;
 }

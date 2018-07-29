@@ -99,6 +99,7 @@ struct sk {
      struct list_head   sk_node;         /* List of every open socket        */
      struct proto      *proto;
      struct ops        *ops;
+     uint8_t            retries;
      unsigned char      close_on_write:1;/* Close socket once sendbuf empty  */
      unsigned char      close:1;         /* Close socket                     */
      unsigned char      closing:1;       /* Closing handshake in progress    */
