@@ -35,6 +35,7 @@
 #define WSD_ENOMEM      6 /* No memory */
 #define WSD_ENUM        7 /* Unexpected numerical value */
 #define WSD_EOF         8 /* End of file */
+#define WSD_EAI         9 /* getaddrinfo returned an error */
 
 #define LOG_VVVERBOSE 3
 #define LOG_VVERBOSE  2
@@ -133,6 +134,7 @@ typedef struct {
      int         port;
      char       *fwd_port;
      char      **fwd_hostname;
+     uint8_t     fwd_hostname_num;
      const char *pidfilename;
      int         verbose;
      bool        no_fork;      /* Does not fork, stays attached to terminal  */

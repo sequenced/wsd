@@ -41,6 +41,7 @@
 #define DEFAULT_FORWARD_PORT              "6085"
 #define DEFAULT_FORWARD_HOST              "127.0.0.1"
 #define DEFAULT_LISTENING_PORT            6084
+#define DEFAULT_MAX_HOSTNAMES             4
 
 static const char *ident = "wsd";
 static int drop_priv(uid_t new_uid);
@@ -57,14 +58,24 @@ main(int argc, char **argv)
      int idle_timeout_arg = DEFAULT_IDLE_TIMEOUT;
      int verbose_arg = 0;
      const char *fwd_port_arg = DEFAULT_FORWARD_PORT;
-     const char *fwd_hostname_arg = NULL;
      const char *user_arg = NULL;
      const char *pidfile_arg = NULL;
+     unsigned int fwd_hostname_num = 0;
+     char **fwd_hostname_arg = calloc(sizeof *fwd_hostname_arg,
+                                      DEFAULT_MAX_HOSTNAMES);
+     A(fwd_hostname_arg);
 
      while ((opt = getopt(argc, argv, "h:p:o:f:u:i:dv?")) != -1) {
           switch (opt) {
           case 'h':
-               fwd_hostname_arg = optarg;
+               if (fwd_hostname_num >= DEFAULT_MAX_HOSTNAMES) {
+                    fprintf(stderr,
+                            "%s: too many hostnames (maximum is %u)\n",
+                            argv[0],
+                            DEFAULT_MAX_HOSTNAMES);
+                    exit(EXIT_FAILURE);
+               }
+               fwd_hostname_arg[fwd_hostname_num++] = optarg;
                break;
           case 'u':
                user_arg = optarg;
@@ -93,15 +104,15 @@ main(int argc, char **argv)
                break;
           default:
                fprintf(stderr,
-                       "%s: unknown option\nTry '%s -?' for more information.\n",
+                       "%s: unknown option\nTry '%s -?' for help.\n",
                        optarg,
                        argv[0]);
                exit(EXIT_FAILURE);
           }
      }
 
-     if (NULL == fwd_hostname_arg)
-          fwd_hostname_arg = DEFAULT_FORWARD_HOST;
+     if (0 == fwd_hostname_num)
+          fwd_hostname_arg[fwd_hostname_num++] = DEFAULT_FORWARD_HOST;
 
      if (NULL == user_arg)
           user_arg = "wsd";
@@ -137,11 +148,8 @@ main(int argc, char **argv)
      cfg.uid = pwent->pw_uid;
      cfg.port = port_arg;
      cfg.fwd_port = strdup(fwd_port_arg);
-     cfg.fwd_hostname = malloc(2);
-     A(cfg.fwd_hostname);
-     memset(cfg.fwd_hostname, 0, 2);
-     cfg.fwd_hostname[0] = malloc(strlen(fwd_hostname_arg) + 1);
-     strcpy(cfg.fwd_hostname[0], fwd_hostname_arg);
+     cfg.fwd_hostname = fwd_hostname_arg;
+     cfg.fwd_hostname_num = fwd_hostname_num;
      cfg.verbose = verbose_arg;
      cfg.no_fork = no_fork_arg;
      cfg.pidfilename = pidfile_arg;

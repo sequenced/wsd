@@ -56,5 +56,6 @@ int check_idle_timeout(const sk_t *sk,
 bool has_timed_out(const struct timespec *instant,
                    const struct timespec *now,
                    const int timeout);
+void next_host();
 
 #endif /* #ifndef __COMMON_H__ */

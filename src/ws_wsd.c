@@ -44,6 +44,7 @@
 
 #define SCRATCH_SIZE 64
 
+extern unsigned int num;
 extern unsigned int wsd_errno;
 extern const wsd_config_t *wsd_cfg;
 extern struct list_head *sk_list;
@@ -55,7 +56,7 @@ static bool is_valid_proto(http_req_t *hr);
 static bool is_valid_ver(http_req_t *hr);
 static int prepare_handshake(skb_t *b, http_req_t *hr);
 static int generate_accept_val(skb_t *b, http_req_t *hr);
-static int sock_open(unsigned int num);
+static int sock_open(const char *hostname, const char *service);
 
 int
 ws_recv(sk_t *sk)
@@ -71,12 +72,23 @@ ws_recv(sk_t *sk)
 
      AN(skb_rdsz(sk->recvbuf));
 
+     int rv;
      if (NULL == pp2sk) {
-          if (0 > sock_open(0))
+          int retries = wsd_cfg->fwd_hostname_num;
+          while (retries--) {
+               printf("Trying %s\n", wsd_cfg->fwd_hostname[num]);
+               rv = sock_open(wsd_cfg->fwd_hostname[num], wsd_cfg->fwd_port);
+               if (0 > rv && wsd_errno == WSD_EAI) {
+                    next_host();
+                    continue;
+               }
+               break;
+          }
+          if (0 > rv)
                return (-1);
      }
 
-     int rv, frames = 0;
+     int frames = 0;
      while (0 == (rv = sk->proto->decode_frame(sk)))
           frames++;
 
@@ -273,7 +285,7 @@ generate_accept_val(skb_t *b, http_req_t *hr)
 }
 
 int
-sock_open(unsigned int num)
+sock_open(const char *hostname, const char *service)
 {
      AZ(pp2sk);
      if (!(pp2sk = malloc(sizeof(sk_t)))) {
@@ -285,6 +297,7 @@ sock_open(unsigned int num)
      int fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
      if (0 > fd) {
           free(pp2sk);
+          pp2sk = NULL;
           wsd_errno = WSD_CHECKERRNO;
           return (-1);
      }
@@ -294,16 +307,10 @@ sock_open(unsigned int num)
      hints.ai_family = AF_INET;
      hints.ai_socktype = SOCK_STREAM;
      hints.ai_flags = AI_NUMERICSERV;
-     int rv = getaddrinfo(wsd_cfg->fwd_hostname[num],
-                          wsd_cfg->fwd_port,
-                          &hints,
-                          &res);
+     int rv = getaddrinfo(hostname, service, &hints, &res);
      if (0 > rv) {
-          syslog(LOG_ERR,
-                 "%s: %s",
-                 gai_strerror(rv),
-                 wsd_cfg->fwd_hostname[num]);
-          wsd_errno = WSD_CHECKERRNO;
+          syslog(LOG_ERR, "%s: %s", gai_strerror(rv), hostname);
+          wsd_errno = WSD_EAI;
           goto error;
      }
      while (res->ai_next) {

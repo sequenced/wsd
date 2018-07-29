@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2017 Michael Goldschmidt
+ *  Copyright (C) 2017-2018 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -36,9 +36,11 @@ extern int wsd_errno;
 extern const wsd_config_t *wsd_cfg;
 
 bool done = false;
+unsigned int num = 0;
 
 static int sock_read(sk_t *sk);
 static int sock_write(sk_t *sk);
+static void check_errno();
 
 inline void
 turn_off_events(sk_t *sk, unsigned int events)
@@ -186,8 +188,8 @@ on_epoll_event(struct epoll_event *evt,
      sk_t *sk = (sk_t*)evt->data.ptr;
      A(sk->fd >= 0);
 
-     if (evt->events & EPOLLIN ||
-         evt->events & EPOLLPRI) {
+     if (evt->events & EPOLLIN
+         || evt->events & EPOLLPRI) {
 
           A(!sk->close_on_write);
           A(!sk->close);
@@ -195,12 +197,14 @@ on_epoll_event(struct epoll_event *evt,
           rv = sk->ops->read(sk);
           ts_last_io_set(sk, now);
           if (0 > rv && wsd_errno != WSD_EAGAIN) {
+               if (wsd_errno == WSD_CHECKERRNO)
+                    check_errno(sk);
                AZ(sk->ops->close(sk));
           } else {
                rv = (*post_read)(sk);
-               if (0 > rv &&
-                   wsd_errno != WSD_EAGAIN &&
-                   wsd_errno != WSD_EINPUT) {
+               if (0 > rv
+                   && wsd_errno != WSD_EAGAIN
+                   && wsd_errno != WSD_EINPUT) {
                     AZ(sk->ops->close(sk));
                } else if (sk->close) {
                     AZ(sk->ops->close(sk));
@@ -219,9 +223,9 @@ on_epoll_event(struct epoll_event *evt,
                AZ(sk->ops->close(sk));
           }
 
-     } else if (evt->events & EPOLLERR ||
-                evt->events & EPOLLHUP ||
-                evt->events & EPOLLRDHUP) {
+     } else if (evt->events & EPOLLERR
+                || evt->events & EPOLLHUP
+                || evt->events & EPOLLRDHUP) {
           AZ(sk->ops->close(sk));
      }
 
@@ -434,4 +438,21 @@ has_timed_out(const struct timespec *instant,
      diff_in_millis += (tv_nsec_diff / 1000000);
 
      return (diff_in_millis > timeout ? true : false);
+}
+
+inline void
+check_errno()
+{
+     if (errno == ECONNREFUSED
+         || errno == EAGAIN
+         || errno == ENETUNREACH
+         || errno == ETIMEDOUT)
+          next_host();
+}
+
+inline void
+next_host()
+{
+     if (++num >= wsd_cfg->fwd_hostname_num)
+          num = 0;
 }
