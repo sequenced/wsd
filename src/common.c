@@ -40,6 +40,7 @@ unsigned int num = 0;
 
 static int sock_read(sk_t *sk);
 static int sock_write(sk_t *sk);
+static int on_write(sk_t *sk, const struct timespec *now);
 static void check_errno();
 
 inline void
@@ -180,6 +181,21 @@ sock_destroy(sk_t *sk)
 }
 
 int
+on_write(sk_t *sk, const struct timespec *now)
+{
+     int rv = sk->ops->write(sk);
+     ts_last_io_set(sk, now);
+     if (0 > rv && wsd_errno != WSD_EAGAIN) {
+          AZ(sk->ops->close(sk));
+     } else if (sk->close_on_write && 0 == skb_rdsz(sk->sendbuf)) {
+          AZ(sk->ops->close(sk));
+     } else if (sk->close) {
+          AZ(sk->ops->close(sk));
+     }
+     return rv;
+}
+
+int
 on_epoll_event(struct epoll_event *evt,
                int (*post_read)(sk_t *sk),
                const struct timespec *now)
@@ -212,17 +228,7 @@ on_epoll_event(struct epoll_event *evt,
           }
 
      } else if (evt->events & EPOLLOUT) {
-
-          rv = sk->ops->write(sk);
-          ts_last_io_set(sk, now);
-          if (0 > rv && wsd_errno != WSD_EAGAIN) {
-               AZ(sk->ops->close(sk));
-          } else if (sk->close_on_write && 0 == skb_rdsz(sk->sendbuf)) {
-               AZ(sk->ops->close(sk));
-          } else if (sk->close) {
-               AZ(sk->ops->close(sk));
-          }
-
+          rv = on_write(sk, now);
      } else if (evt->events & EPOLLERR
                 || evt->events & EPOLLHUP
                 || evt->events & EPOLLRDHUP) {
