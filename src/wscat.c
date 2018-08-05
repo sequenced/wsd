@@ -130,7 +130,6 @@ main(int argc, char **argv)
      bool tls_arg = false;
      bool no_check_cert_arg = false;
 #endif
-
      char *s;
      bin = (s = strrchr(argv[0], '/')) ? (char*)(s + 1) : argv[0];
 
@@ -936,6 +935,8 @@ wssk_ws_start_closing_handshake()
 {
      if (0 > wssk->proto->start_closing_handshake(wssk, WS_1000, true))
           done = true;
+     else
+          printf("started closing handshake!!!!\n");
 }
 
 #ifdef HAVE_LIBSSL
@@ -1019,8 +1020,6 @@ wssk_tls_handshake(sk_t *sk)
                return (-1);
           }
      } else {
-          if (LOG_VERBOSE <= wsd_cfg->verbose)
-               fprintf(stderr, "%s: TLS negotiated\n", bin);
           sk->ops->read = wssk_tls_read;
           sk->ops->write = wssk_tls_write;
           if (0 > create_http_req(sk))
@@ -1034,7 +1033,6 @@ int
 wssk_tls_read(sk_t *sk)
 {
      A(0 <= sk->fd);
-
      if (0 == skb_wrsz(sk->recvbuf)) {
           turn_off_events(sk, EPOLLIN);
           wsd_errno = WSD_EAGAIN;
@@ -1056,21 +1054,26 @@ wssk_tls_read(sk_t *sk)
           /* Noop - try again. */
           return 0;
      } else if (rv == SSL_ERROR_WANT_WRITE) {
-          if (LOG_VERBOSE <= wsd_cfg->verbose)
-               fprintf(stderr, "%s: TLS renegotiation upon read\n", bin);
+          /* TLS renegotiation upon read */
           sk->ops->read = wssk_tls_handshake_read;
           sk->ops->write = wssk_tls_handshake_write;
           turn_on_events(sk, EPOLLOUT);
           return 0;
+     } else if (rv == SSL_ERROR_ZERO_RETURN) {
+          /* EOF */
+          wsd_errno = WSD_CHECKERRNO;
+          return (-1);
      }
 
      print_tls_error();
+     wsd_errno = WSD_CHECKERRNO;
      return (-1);
 }
 
 int
 wssk_tls_write(sk_t *sk)
 {
+     A(0 <= sk->fd);
      if (0 == skb_rdsz(sk->sendbuf)) {
           turn_off_events(sk, EPOLLOUT);
           wsd_errno = WSD_EAGAIN;
@@ -1093,15 +1096,19 @@ wssk_tls_write(sk_t *sk)
           /* Noop - try again. */
           return 0;
      } else if (rv == SSL_ERROR_WANT_READ) {
-          if (LOG_VERBOSE <= wsd_cfg->verbose)
-               fprintf(stderr, "%s: TLS renegotiation upon write\n", bin);
+          /* TLS renegotiation upon write */
           sk->ops->read = wssk_tls_handshake_read;
           sk->ops->write = wssk_tls_handshake_write;
           turn_on_events(sk, EPOLLIN);
           return 0;
+     } else if (rv == SSL_ERROR_ZERO_RETURN) {
+          /* EOF */
+          wsd_errno = WSD_CHECKERRNO;
+          return (-1);
      }
 
      print_tls_error();
+     wsd_errno = WSD_CHECKERRNO;
      return (-1);
 }
 
