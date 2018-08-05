@@ -935,8 +935,6 @@ wssk_ws_start_closing_handshake()
 {
      if (0 > wssk->proto->start_closing_handshake(wssk, WS_1000, true))
           done = true;
-     else
-          printf("started closing handshake!!!!\n");
 }
 
 #ifdef HAVE_LIBSSL
