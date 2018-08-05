@@ -381,21 +381,20 @@ wssk_init()
      wssk = malloc(sizeof(sk_t));
      if (!wssk) {
           perror("malloc");
+          AZ(close(fd));
           return (-1);
      }
      memset(wssk, 0, sizeof(sk_t));
 
      if (0 > sk_init(wssk, fd, 0ULL)) {
           fprintf(stderr, "%s: sk_init: 0x%x\n", bin, wsd_errno);
-          AZ(close(fd));
-          return (-1);
+          goto error;
      }
 
 #ifdef HAVE_LIBSSL
      if (wsd_cfg->tls && 0 > wssk_tls_init(wssk, wsd_cfg->fhostname[0])) {
           fprintf(stderr, "%s: wssk_tls_init", bin);
-          AZ(close(fd));
-          return (-1);
+          goto error;
      }
 #endif
 
@@ -411,10 +410,24 @@ wssk_init()
      AZ(register_for_events(wssk));
 
      return 0;
+
+error:
+     AZ(close(fd));
+     free(wssk);
+     wssk = NULL;
+     return (-1);
 }
 
 int
 wssk_close(sk_t *sk) {
+     if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
+          printf("%s:%d: %s: closing %d\n",
+                 __FILE__,
+                 __LINE__,
+                 __func__,
+                 sk->fd);
+     }
+
 #ifdef HAVE_LIBSSL
      if (sk->ssl)
           SSL_shutdown(sk->ssl); /* Unidirectional shutdown only. */
@@ -606,6 +619,11 @@ int
 stdin_recv(sk_t *sk)
 {
      AN(skb_rdsz(sk->recvbuf));
+
+     if (NULL == wssk) {
+          /* Websocket connection failed, bail out ... */
+          return (-1);
+     }
 
      int rv, frames = 0;
      while (0 == (rv = sk->proto->decode_frame(sk)))
