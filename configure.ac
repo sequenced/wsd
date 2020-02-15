@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.67])
-AC_INIT([wsd], [0.23], [bugs@sequencedsystems.com])
+AC_INIT([wsd], [0.24], [bugs@sequencedsystems.com])
 AC_CONFIG_SRCDIR([src/wsd.c])
 AM_INIT_AUTOMAKE([-Wall -Werror])
 AM_PROG_CC_C_O
