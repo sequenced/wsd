@@ -113,7 +113,7 @@ ws_decode_handshake(sk_t *sk, http_req_t *req)
 {
      if (!is_valid_ver(req)) {
 
-          if (0 == skb_put_str(sk->sendbuf, HTTP_400)) {
+          if (0 == skb_put_strn(sk->sendbuf, HTTP_400, strlen(HTTP_400))) {
                sk->close_on_write = 1;
           }
 
@@ -125,7 +125,7 @@ ws_decode_handshake(sk_t *sk, http_req_t *req)
      /* TODO make protocol configurable */
      if (!is_valid_proto(req)) {
           
-          if (0 == skb_put_str(sk->sendbuf, HTTP_400)) {
+          if (0 == skb_put_strn(sk->sendbuf, HTTP_400, strlen(HTTP_400))) {
                sk->close_on_write = 1;
           }
 
@@ -138,7 +138,7 @@ ws_decode_handshake(sk_t *sk, http_req_t *req)
 
      if (0 > prepare_handshake(sk->sendbuf, req)) {
 
-          if (0 == skb_put_str(sk->sendbuf, HTTP_500)) {
+          if (0 == skb_put_strn(sk->sendbuf, HTTP_500, strlen(HTTP_500))) {
                sk->close_on_write = 1;
           }
           

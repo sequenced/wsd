@@ -11,30 +11,43 @@
 #include <string.h>
 #include "parser.h"
 
-#define NUM_SAMPLES 3
+#define NUM_SAMPLES 7
+
+unsigned int wsd_errno = WSD_CHECKERRNO;
 
 char *samples[] = {
      "safari-9.1.1-varnish-4.1.3-sample",
+     "safari-9.1.1-sample",
      "firefox-47-varnish-4.1.3-sample",
-     "chrome-51-varnish-4.1.3-sample"
+     "firefox-47-sample",
+     "firefox-60-varnish-6.2.0-sample",
+     "chrome-51-varnish-4.1.3-sample",
+     "chrome-51-sample"
 };
 
 static void
-parse_samples() {
+GIVEN_sample_field_value_WHEN_parsing_THEN_recognised(chunk_t *f)
+{
+     chunk_t result;
+     assert(0 < http_field_value_tok(f, &result));
+}
+
+static void
+GIVEN_request_WHEN_parsing_THEN_recognised() {
      int fd;
      for (int i = 0; i < NUM_SAMPLES; i++) {
           assert(0 < (fd = open(samples[i], O_RDONLY)));
 
           char buf[8192];
-          bzero(buf, 8192);
+          memset(buf, 0, sizeof(buf));
           assert(0 < read(fd, buf, 8191));
 
-          string_t *t = malloc(sizeof(string_t));
+          chunk_t *t = malloc(sizeof(chunk_t));
 
           assert (0 < http_header_tok(buf, t));
 
           http_req_t *req = malloc(sizeof(http_req_t));
-          bzero(req, sizeof(http_req_t));
+          memset(req, 0, sizeof(http_req_t));
           assert(0 == parse_request_line(t, req));
           assert(0 < req->method.len);
           assert(0 < req->req_target.len);
@@ -50,7 +63,9 @@ parse_samples() {
           assert(0 < req->host.len);
           assert(0 < req->origin.len);
           assert(0 < req->conn.len);
+          GIVEN_sample_field_value_WHEN_parsing_THEN_recognised(&req->conn);
           assert(0 < req->upgrade.len);
+          GIVEN_sample_field_value_WHEN_parsing_THEN_recognised(&req->upgrade);
           assert(0 < req->sec_ws_ver.len);
           assert(0 < req->sec_ws_proto.len);
           assert(0 < req->sec_ws_key.len);
@@ -63,53 +78,61 @@ parse_samples() {
 }
 
 static void
-field_value_tokenisation()
+GIVEN_field_value_WHEN_parsing_THEN_recognised()
 {
      static char *input1 = "one,two, threee,,four, ,five,";
      static char *input2 = "nodelim";
 
-     string_t s;
-     s.start = input1;
+     chunk_t s;
+     s.p = input1;
      s.len = strlen(input1);
 
-     string_t result;
+     chunk_t result;
 
      assert(0 < http_field_value_tok(&s, &result));
      assert(3 == result.len);
-     assert(0 == strncmp(result.start, "one", 3));
+     assert(0 == strncmp(result.p, "one", 3));
      assert(0 < http_field_value_tok(NULL, &result));
      assert(3 == result.len);
-     assert(0 == strncmp(result.start, "two", 3));
+     assert(0 == strncmp(result.p, "two", 3));
      assert(0 < http_field_value_tok(NULL, &result));
      assert(7 == result.len);
-     assert(0 == strncmp(result.start, " threee", 7));
+     assert(0 == strncmp(result.p, " threee", 7));
      assert(0 == http_field_value_tok(NULL, &result));
      assert(0 == result.len);
      assert(0 < http_field_value_tok(NULL, &result));
      assert(4 == result.len);
-     assert(0 == strncmp(result.start, "four", 4));
+     assert(0 == strncmp(result.p, "four", 4));
      assert(0 < http_field_value_tok(NULL, &result));
      assert(1 == result.len);
-     assert(0 == strncmp(result.start, " ", 1));
+     assert(0 == strncmp(result.p, " ", 1));
      assert(0 < http_field_value_tok(NULL, &result));
      assert(4 == result.len);
-     assert(0 == strncmp(result.start, "five", 4));
-     assert(0 == http_field_value_tok(NULL, &result));
-     assert(0 == result.len);
+     assert(0 == strncmp(result.p, "five", 4));
      assert(0 > http_field_value_tok(NULL, &result));
+     assert(wsd_errno == WSD_EINPUT);
+     assert(0 == result.len);
+     assert(0 == result.p);
+     assert(0 > http_field_value_tok(NULL, &result));
+     assert(wsd_errno == WSD_EINPUT);
+     assert(0 == result.len);
+     assert(0 == result.p);
 
-     s.start = input2;
+     s.p = input2;
      s.len = strlen(input2);
 
      assert(0 < http_field_value_tok(&s, &result));
      assert(strlen(input2) == result.len);
-     assert(0 == strncmp(result.start, input2, result.len));
+     assert(0 == strncmp(result.p, input2, result.len));
      assert(0 > http_field_value_tok(NULL, &result));
+     assert(wsd_errno == WSD_EINPUT);
+     assert(0 == result.len);
+     assert(0 == result.p);
 }
 
 int
 main() {
-     parse_samples();
-     field_value_tokenisation();
+     GIVEN_request_WHEN_parsing_THEN_recognised();
+     GIVEN_field_value_WHEN_parsing_THEN_recognised();
      return 0;
 }

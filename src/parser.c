@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2014-2017 Michael Goldschmidt
+ *  Copyright (C) 2014-2020 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -284,14 +284,15 @@ http_field_value_tok(chunk_t *s, chunk_t *result)
           return (-1);
      }
 
-     if (0 > cur->len) {
+     if (0 == cur->len) {
           wsd_errno = WSD_EINPUT;
           return (-1);
      }
 
      char *start = cur->p;
      int found = 0, len = cur->len;
-     while (cur->len--) {
+     while (cur->len) {
+          cur->len--;
           if (',' == *cur->p++) {
                found = 1;
                break;

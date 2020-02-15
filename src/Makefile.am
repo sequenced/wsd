@@ -5,6 +5,7 @@ wsd_SOURCES = wsd.c wschild.c wschild.h pp2.c pp2.h ws.c ws.h ws_wsd.c \
 wsd_LDFLAGS = -ldl
 wscat_SOURCES = wscat.c common.c parser.c ws.c uri.c uri.h
 # Binaries to aid unit testing
-noinst_LIBRARIES = libtestcommon.a liburi.a
+noinst_LIBRARIES = libtestcommon.a liburi.a libparser.a
 libtestcommon_a_SOURCES = wschild.c pp2.c http.c wscat.c
 liburi_a_SOURCES = uri.c uri.h
+libparser_a_SOURCES = parser.c parser.h

@@ -113,12 +113,6 @@ trim(chunk_t *chk)
 }
 
 inline int
-skb_put_str(skb_t *b, const char *s)
-{
-     return skb_put_strn(b, s, strlen(s));
-}
-
-inline int
 skb_put_strn(skb_t *b, const char *s, size_t n) {
      if (skb_wrsz(b) < n)
           return (-1);
