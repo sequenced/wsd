@@ -15,6 +15,7 @@ GIVEN_invalid_input_WHEN_parsing_THEN_return_error()
      assert(-1 == parse_uri("foo:/", &uri));
      assert(-1 == parse_uri("foo://", &uri));
      assert(-1 == parse_uri("foo://bar:", &uri));
+     assert(-1 == parse_uri("foo://bar:88//", &uri));
      return 0;
 }
 
@@ -44,9 +45,35 @@ GIVEN_valid_input_WHEN_parsing_THEN_return_success()
 }
 
 int
+GIVEN_path_WHEN_parsing_THEN_path_recognised() {
+     uri_t uri;
+     memset((void*)&uri, 0, sizeof(uri));
+     assert(0 == parse_uri("ws://foobar", &uri));
+     assert(1 == uri.path.len);
+     assert(0 == strncmp("/", uri.path.p, uri.path.len));
+     memset((void*)&uri, 0, sizeof(uri));
+     assert(0 == parse_uri("ws://foobar/", &uri));
+     assert(1 == uri.path.len);
+     assert(0 == strncmp("/", uri.path.p, uri.path.len));
+     memset((void*)&uri, 0, sizeof(uri));
+     assert(-1 == parse_uri("ws://foobar//", &uri));
+     memset((void*)&uri, 0, sizeof(uri));
+     assert(0 == parse_uri("ws://foobar/one", &uri));
+     assert(4 == uri.path.len);
+     assert(0 == strncmp("/one", uri.path.p, uri.path.len));
+     memset((void*)&uri, 0, sizeof(uri));
+     assert(0 == parse_uri("ws://foobar/one?q=two", &uri));
+     assert(10 == uri.path.len);
+     assert(0 == strncmp("/one?q=two", uri.path.p, uri.path.len));
+
+     return 0;
+}
+
+int
 main()
 {
      assert(0 == GIVEN_invalid_input_WHEN_parsing_THEN_return_error());
      assert(0 == GIVEN_valid_input_WHEN_parsing_THEN_return_success());
+     assert(0 == GIVEN_path_WHEN_parsing_THEN_path_recognised());
      return 0;
 }

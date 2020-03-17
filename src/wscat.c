@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2017-2018 Michael Goldschmidt
+ *  Copyright (C) 2017-2020 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -123,6 +123,7 @@ main(int argc, char **argv)
      char *fwd_hostname_arg = NULL;
      char *fwd_port_arg = NULL;
      char *user_agent_arg = "wscat";
+     char *request_target_arg = "/";
      char *sec_ws_proto_arg = NULL;
      char *sec_ws_ver_arg = "13";
      char *sec_ws_key_arg = "B9Pc1t39Tqoj+fidr/bzeg==";
@@ -217,6 +218,7 @@ main(int argc, char **argv)
           fwd_hostname_arg = strndup(uri.host.p, uri.host.len);
           if (uri.port.len)
                fwd_port_arg = strndup(uri.port.p, uri.port.len);
+          request_target_arg = strndup(uri.path.p, uri.path.len);
      }
 
      is_json = is_json_arg;
@@ -257,6 +259,7 @@ main(int argc, char **argv)
      wsd_cfg->verbose = verbose_arg;
      wsd_cfg->lfd = -1;
      wsd_cfg->user_agent = user_agent_arg;
+     wsd_cfg->request_target = request_target_arg;
      wsd_cfg->sec_ws_proto = sec_ws_proto_arg;
      wsd_cfg->sec_ws_ver = sec_ws_ver_arg;
      wsd_cfg->sec_ws_key = sec_ws_key_arg;
@@ -304,8 +307,8 @@ create_http_req(sk_t *sk)
      memset(&req, 0, sizeof(http_req_t));
      req.method.p = "GET";
      req.method.len = 3;
-     req.req_target.p = "/";
-     req.req_target.len = 1;
+     req.req_target.p = strdup(wsd_cfg->request_target);
+     req.req_target.len = strlen(wsd_cfg->request_target);
      req.http_ver.p = "HTTP/1.1";
      req.http_ver.len = 8;
      req.host.p = strdup(wsd_cfg->fhostname[0]);

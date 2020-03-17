@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Michael Goldschmidt
+ *  Copyright (C) 2020 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -45,15 +45,34 @@ parse_uri(char *uri_arg, uri_t *uri)
           return (-1);
      uri->host.p = begin;
      uri->host.len = (unsigned int)(c - begin);
-     if (*c == '\0' || *c == '/')
-          return 0;
-     c++;           /* Skip colon */
+     if (*c == '\0')
+          goto empty_path;
+     if (*c == ':') {
+          c++;           /* Skip colon */
+          begin = c;
+          while (*c != '\0' && *c != '/')
+               c++;
+          if (begin == c)
+               return (-1);
+          uri->port.p = begin;
+          uri->port.len = (unsigned int)(c - begin);
+          if (*c == '\0')
+               goto empty_path;
+     }
+     if (*c != '/')
+          return (-1);
      begin = c;
-     while (*c != '\0' && *c != '/')
+     while (*c != '\0' && *c != '#')
           c++;
      if (begin == c)
-          return (-1);
-     uri->port.p = begin;
-     uri->port.len = (unsigned int)(c - begin);
+          goto empty_path;
+     if (*(begin + 1) == '/')
+          return (-1); /* See section 3.3 RFC3986 */
+     uri->path.p = begin;
+     uri->path.len = (unsigned int)(c - begin);
+     return 0;
+empty_path:
+     uri->path.p = "/"; /* Normalised due to section 5.3.1 RFC7230 */
+     uri->path.len = 1;
      return 0;
 }

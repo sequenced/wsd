@@ -142,6 +142,7 @@ typedef struct {
      int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
      int         closing_handshake_timeout;
      char       *user_agent;
+     char       *request_target;/* Request target; see section 5.3.1 RFC7230 */
      char       *sec_ws_proto;
      char       *sec_ws_ver;
      char       *sec_ws_key;

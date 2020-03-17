@@ -8,6 +8,7 @@ typedef struct {
      chunk_t scheme;
      chunk_t host;
      chunk_t port;
+     chunk_t path;
 } uri_t;
 
 int parse_uri(char *uri_arg, uri_t *uri);
