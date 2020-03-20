@@ -406,9 +406,9 @@ event_loop(int (*on_iteration)(const struct timespec *now),
 }
 
 int
-check_idle_timeout(const sk_t *sk,
-                   const struct timespec *now,
-                   const int timeout)
+check_timeout(const sk_t *sk,
+              const struct timespec *now,
+              const int timeout)
 {
      AN(sk);
 

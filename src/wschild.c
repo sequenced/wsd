@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2014-2018 Michael Goldschmidt
+ *  Copyright (C) 2014-2020 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -64,9 +64,7 @@ static unsigned long int hash(struct sockaddr_in *saddr);
 static void list_init(struct list_head **list);
 static int on_iteration(const struct timespec *now);
 static void check_timeouts_for_each(const struct timespec *now);
-static void check_timeouts(sk_t *sk,
-                           const struct timespec *now,
-                           const int timeout);
+static void check_timeouts(sk_t *sk, const struct timespec *now);
 static void try_recv();
 static int check_closing_handshake_timeout(const sk_t *sk,
                                            const struct timespec *now,
@@ -133,20 +131,19 @@ check_timeouts_for_each(const struct timespec *now)
 {
      sk_t *pos = NULL, *k = NULL;
      list_for_each_entry_safe(pos, k, sk_list, sk_node) {
-          check_timeouts(pos, now, wsd_cfg->idle_timeout);
+          check_timeouts(pos, now);
      }
 }
 
 void
-check_timeouts(sk_t *sk,
-               const struct timespec *now,
-               const int timeout)
+check_timeouts(sk_t *sk, const struct timespec *now)
 {
-     if (check_idle_timeout(sk, now, timeout)) {
+     if (check_timeout(sk, now, wsd_cfg->idle_timeout)) {
           if (!sk->proto->start_closing_handshake
               || 0 > sk->proto->start_closing_handshake(sk, WS_1000, false)) {
                /* Closing handshake failed or not required: close socket */
                AZ(sk->ops->close(sk));
+               return;
           } else {
                /* Started closing handshake, arm timeout. */
                sk->ts_closing_handshake_start.tv_sec = now->tv_sec;
@@ -154,10 +151,15 @@ check_timeouts(sk_t *sk,
           }
      }
 
-     if (check_closing_handshake_timeout(sk, now, timeout)) {
+     if (check_closing_handshake_timeout(sk, now, wsd_cfg->idle_timeout)) {
           /* Closing handshake timed out: close socket */
           AZ(sk->ops->close(sk));
+          return;
      }
+
+     if (check_timeout(sk, now, wsd_cfg->ping_interval))
+          /* Ignoring return value; don't close socket on a failed ping. */
+          sk->proto->ping(sk, false);
 }
 
 int
@@ -237,6 +239,8 @@ sk_close(sk_t *sk)
      AZ(close(sk->fd));
      sk_destroy(sk);
      free(sk);
+
+     sk = NULL;
 
      return 0;
 }

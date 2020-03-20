@@ -47,5 +47,6 @@ int pp2_close(sk_t *sk);
 int pp2_recv(sk_t *sk);
 int pp2_decode_frame(sk_t *sk);
 int pp2_encode_frame(sk_t *sk, wsframe_t *wsf);
+int pp2_nop(sk_t *ignored, const bool ignored_too);
 
 #endif /* #ifndef __PP2_H__ */

@@ -58,6 +58,7 @@ main(int argc, char **argv)
      bool d_arg = false;
      int i_arg = DEFAULT_IDLE_TIMEOUT;
      int v_arg = 0;
+     int n_arg = -1;
      const char *f_arg = DEFAULT_FORWARD_PORT;
      const char *u_arg = NULL;
      const char *p_arg = NULL;
@@ -65,7 +66,7 @@ main(int argc, char **argv)
      char **h_arg = calloc(sizeof *h_arg, DEFAULT_MAX_HOSTNAMES);
      A(h_arg);
 
-     while ((opt = getopt(argc, argv, "h:p:o:f:u:i:dv?")) != -1) {
+     while ((opt = getopt(argc, argv, "h:p:o:f:u:i:n:dv?")) != -1) {
           switch (opt) {
           case 'h':
                if (h_arg_num >= DEFAULT_MAX_HOSTNAMES) {
@@ -85,6 +86,9 @@ main(int argc, char **argv)
                break;
           case 'o':
                o_arg = atoi(optarg);
+               break;
+          case 'n':
+               n_arg = atoi(optarg);
                break;
           case 'f':
                f_arg = optarg;
@@ -154,6 +158,7 @@ main(int argc, char **argv)
      cfg.no_fork = d_arg;
      cfg.pidfilename = p_arg;
      cfg.idle_timeout = i_arg;
+     cfg.ping_interval = n_arg * 1000; /* convert sec to ms */
      cfg.closing_handshake_timeout = DEFAULT_CLOSING_HANDSHAKE_TIMEOUT;
 
      pid_t pid = 0;
@@ -280,6 +285,7 @@ Terminate websockets and multiplex their frames to some backend.\n\n\
   -u  run daemon as user, defaults to wsd\n\
   -d  do not fork and stay attached to terminal\n\
   -i  idle read/write timeout in milliseconds, defaults to 30 seconds\n\
+  -n  ping interval in seconds, defaults to none\n\
   -v  be verbose (use multiple times for maximum effect)\n\
   -?  display this help and exit\n\n\
 ", stdout);

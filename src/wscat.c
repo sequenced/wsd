@@ -60,6 +60,7 @@ static struct option long_opt[] = {
      {"sec-ws-key",           required_argument, 0, 'K'},
      {"user-agent",           required_argument, 0, 'A'},
      {"idle-timeout",         required_argument, 0, 'i'},
+     {"ping-interval",        required_argument, 0, 'p'},
      {"json",                 required_argument, 0, 'j'},
      {"repeat-last",          required_argument, 0, 'R'},
      {"no-handshake",         no_argument,       0, 'N'},
@@ -70,7 +71,7 @@ static struct option long_opt[] = {
      {"help",                 no_argument,       0, 'h'},
      {0, 0, 0, 0}
 };
-static const char *optstring = "V:P:K:A:i:R:vhjNx";
+static const char *optstring = "V:P:K:A:i:R:p:vhjNx";
 static sk_t *fdin = NULL;
 static sk_t *wssk = NULL;
 static bool is_json = false;
@@ -86,10 +87,12 @@ static int post_read(sk_t *sk);
 static int wssk_http_recv(sk_t *sk);
 static int stdin_recv(sk_t *sk);
 static int stdin_decode_frame(sk_t *sk);
+static int stdin_nop(sk_t *ignored, const bool ignored_too);
 static int wssk_ws_recv(sk_t *sk);
 static int wssk_ws_decode_frame(sk_t *sk);
 static int wssk_ws_encode_frame(sk_t *sk, wsframe_t *wsf);
 static void wssk_ws_start_closing_handshake();
+static void wssk_ws_ping();
 static int wssk_ws_encode_data_frame(skb_t *dst,
                                      skb_t *src,
                                      const unsigned int maxlen,
@@ -119,6 +122,7 @@ main(int argc, char **argv)
      bool no_handshake_arg = false;
      int repeat_last_num_arg = -1;
      int idle_timeout_arg = -1;
+     int ping_interval_arg = -1;
      int verbose_arg = 0;
      char *fwd_hostname_arg = NULL;
      char *fwd_port_arg = NULL;
@@ -145,6 +149,9 @@ main(int argc, char **argv)
                break;
           case 'i':
                idle_timeout_arg = atoi(optarg);
+               break;
+          case 'p':
+               ping_interval_arg = atoi(optarg);
                break;
           case 'v':
                verbose_arg++;
@@ -250,6 +257,7 @@ main(int argc, char **argv)
      A(wsd_cfg);
      memset(wsd_cfg, 0, sizeof(wsd_config_t));
      wsd_cfg->idle_timeout = idle_timeout_arg;
+     wsd_cfg->ping_interval = ping_interval_arg * 1000; /* convert sec to ms */
      wsd_cfg->fhostname = malloc(2);
      A(wsd_cfg->fhostname);
      memset(wsd_cfg->fhostname, 0, 2);
@@ -404,6 +412,8 @@ wssk_init()
      wssk->ops->close = wssk_close;
      wssk->proto->decode_frame = wssk_ws_decode_frame;
      wssk->proto->encode_frame = wssk_ws_encode_frame;
+     wssk->proto->ping = ws_ping;
+     wssk->proto->pong = ws_pong;
      wssk->proto->start_closing_handshake = ws_start_closing_handshake;
 
      epfd = epoll_create(1);
@@ -461,6 +471,12 @@ stdin_close(sk_t *sk)
 
      fdin = NULL;
 
+     return 0;
+}
+
+int
+stdin_nop(sk_t * ignored, const bool ignored_too)
+{
      return 0;
 }
 
@@ -530,6 +546,8 @@ wssk_http_recv(sk_t *sk)
      fdin->ops->recv = stdin_recv;
      fdin->ops->close = stdin_close;
      fdin->proto->decode_frame = stdin_decode_frame;
+     fdin->proto->ping = stdin_nop;
+     fdin->proto->pong = stdin_nop;
 
      AZ(register_for_events(fdin));
 
@@ -715,7 +733,10 @@ balanced_span(const skb_t *buf, const char begin, const char end)
 int
 on_iteration(const struct timespec *now)
 {
-     if (1 == check_idle_timeout(wssk, now, wsd_cfg->idle_timeout)) {
+     if (check_timeout(wssk, now, wsd_cfg->ping_interval))
+          wssk_ws_ping();
+
+     if (check_timeout(wssk, now, wsd_cfg->idle_timeout)) {
           if (!no_handshake)
                wssk_ws_start_closing_handshake();
      }
@@ -836,23 +857,24 @@ print_help(const char *bin)
      printf("Usage: %s [OPTIONS]... [URI]\n", bin);
      fputs("\
 Write to and read from remote system HOST via websocket protocol.\n\n\
-  -A, --user-agent    set User-Agent string in HTTP upgrade request\n\
-  -V, --sec-ws-ver    set Sec-WebSocket-Version string\n\
-  -P, --sec-ws-proto  set Sec-WebSocket-Protocol string\n\
-  -K, --sec-ws-key    set Sec-WebSocket-Key string\n\
-  -i, --idle-timeout  idle read/write timeout in milliseconds\n\
-  -j, --json          assume JSON-formatted input\n\
-  -R, --repeat-last   repeat last input as many times as specified\n\
-  -N, --no-handshake  do not start or finish a closing handshake\n\
-  -v, --verbose       be verbose (use multiple times for maximum effect)\n\
+  -A, --user-agent=S     set User-Agent string in HTTP upgrade request to S\n\
+  -V, --sec-ws-ver=V     set Sec-WebSocket-Version string to V\n\
+  -P, --sec-ws-proto=S   set Sec-WebSocket-Protocol string to S\n\
+  -K, --sec-ws-key=K     set Sec-WebSocket-Key string to K\n\
+  -i, --idle-timeout=N   idle read/write timeout in N milliseconds\n\
+  -p, --ping-interval=N  ping interval in N seconds\n\
+  -j, --json             assume JSON-formatted input\n\
+  -R, --repeat-last=N    repeat last input N times\n\
+  -N, --no-handshake     do not start or finish a closing handshake\n\
+  -v, --verbose          be verbose (use multiple times for maximum effect)\n\
 "
 #ifdef HAVE_LIBSSL
-"\
+           "\
   -x, --no-check-certificate\n\
-                      do not check server certificate\n"
+                         do not check server certificate\n"
 #endif
-"\
-  -h, --help          display this help and exit\n\n\
+           "\
+  -h, --help             display this help and exit\n\n\
 ", stdout);
      printf("Version %s - Please send bug reports to: %s\n",
             PACKAGE_VERSION,
@@ -924,8 +946,13 @@ wssk_ws_decode_frame(sk_t *sk)
           }
           break;
      case WS_PING_FRAME:
+          skb_compact(sk->recvbuf);
+          rv = sk->proto->pong(sk, true);
+          break;
      case WS_PONG_FRAME:
-          /* TODO */
+          skb_compact(sk->recvbuf);
+          break;
+     default:
           wsd_errno = WSD_EBADREQ;
           rv = -1;
      }
@@ -937,6 +964,12 @@ void
 wssk_ws_start_closing_handshake()
 {
      if (0 > wssk->proto->start_closing_handshake(wssk, WS_1000, true))
+          done = true;
+}
+
+void
+wssk_ws_ping() {
+     if (0 > wssk->proto->ping(wssk, true))
           done = true;
 }
 

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2014-2018 Michael Goldschmidt
+ *  Copyright (C) 2014-2020 Michael Goldschmidt
  *
  *  This file is part of wsd/wscat.
  *
@@ -148,6 +148,8 @@ ws_decode_handshake(sk_t *sk, http_req_t *req)
      /* "switch" into websocket mode */
      sk->proto->decode_frame = ws_decode_frame;
      sk->proto->encode_frame = ws_encode_frame;
+     sk->proto->ping = ws_ping;
+     sk->proto->pong = ws_pong;
      sk->proto->start_closing_handshake = ws_start_closing_handshake;
      sk->ops->recv = ws_recv;
 
@@ -336,6 +338,8 @@ sk_open(const char *hostname, const char *service)
      pp2sk->ops->close = pp2_close;
      pp2sk->proto->decode_frame = pp2_decode_frame;
      pp2sk->proto->encode_frame = pp2_encode_frame;
+     pp2sk->proto->ping = pp2_nop;
+     pp2sk->proto->ping = pp2_nop;
      list_add_tail(&pp2sk->sk_node, sk_list);
      AZ(register_for_events(pp2sk));
      return 0;

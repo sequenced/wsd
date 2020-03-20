@@ -26,6 +26,9 @@ Sets Sec-WebSocket-Key string in HTTP upgrade request. By default wscat calculat
 .IP "-i, --idle-timeout"
 The maximum time in milliseconds that you allow wscat to idle after a read from or write to websocket, or standard input. By default the command does not timeout.
 .TP
+.IP "-p, --ping-interval"
+The ping interval in seconds at which wscat sends a ping frame to a remote system. If data is read from or written to a websocket during the ping interval then no ping frame is sent. By default, the command does not ping.
+.TP
 .IP "-j, --json"
 Assumes that input is formatted as JavaScript Object Notation (JSON). Each object is sent in a single frame.
 .TP

@@ -313,3 +313,9 @@ pp2_close(sk_t *sk) {
      pp2sk = NULL;
      return 0;
 }
+
+int
+pp2_nop(sk_t *ignored, const bool ignored_too)
+{
+     return 0;
+}

@@ -54,8 +54,10 @@ extern unsigned int wsd_errno;
 extern const wsd_config_t *wsd_cfg;
 
 static int dispatch_payload(sk_t *sk, wsframe_t *wsf);
-static int encode_ping_frame(sk_t *sk, wsframe_t *wsf);
-static int encode_pong_frame(sk_t *sk, wsframe_t *wsf);
+static int encode_ping_pong_frame(skb_t *sk,
+                                  const int opcode,
+                                  const bool do_mask,
+                                  const uint64_t hash);
 static int encode_close_frame(skb_t *b,
                               const int status,
                               const bool do_mask,
@@ -191,7 +193,7 @@ ws_decode_frame(sk_t *sk)
 int
 dispatch_payload(sk_t *sk, wsframe_t *wsf)
 {
-     int rv;
+     int rv = -1;
      switch (OPCODE(wsf->byte1)) {
      case WS_TEXT_FRAME:
      case WS_BINARY_FRAME:
@@ -202,10 +204,12 @@ dispatch_payload(sk_t *sk, wsframe_t *wsf)
           rv = ws_finish_closing_handshake(sk, false, wsf->payload_len);
           break;
      case WS_PING_FRAME:
-          rv = encode_ping_frame(sk, wsf);
+          skb_compact(sk->recvbuf);
+          rv = sk->proto->pong(sk, false);
           break;
      case WS_PONG_FRAME:
-          rv = encode_pong_frame(sk, wsf);
+          skb_compact(sk->recvbuf);
+          rv = 0;
           break;
      default:
           if (LOG_VVVERBOSE <= wsd_cfg->verbose) {
@@ -288,17 +292,39 @@ ws_finish_closing_handshake(sk_t *sk,
 }
 
 int
-encode_ping_frame(sk_t *sk, wsframe_t *ignored)
+encode_ping_pong_frame(skb_t *dst,
+                       const int opcode,
+                       const bool do_mask,
+                       const uint64_t hash)
 {
-     wsd_errno = WSD_EBADREQ;
-     return (-1);
-}
+     unsigned int frame_len = do_mask ?
+          WS_MASKED_FRAME_LEN : WS_UNMASKED_FRAME_LEN;
 
-int
-encode_pong_frame(sk_t *sk, wsframe_t *ignored)
-{
-     wsd_errno = WSD_EBADREQ;
-     return (-1);
+     if (frame_len > skb_wrsz(dst)) {
+          wsd_errno = WSD_ENOMEM;
+          return (-1);
+     }
+
+     wsframe_t wsf;
+     memset(&wsf, 0, sizeof(wsframe_t));
+     wsf.payload_len = 0;
+     set_fin_bit(wsf.byte1);
+     set_opcode(wsf.byte1, opcode);
+     if (do_mask) {
+          set_mask_bit(wsf.byte2);
+          wsf.masking_key = 0xcafebabe;
+     }
+
+     if (LOG_VERBOSE <= wsd_cfg->verbose)
+          ws_printf(stderr, &wsf, "TX", hash);
+
+     skb_put(dst, wsf.byte1);
+     AZ(ws_set_payload_len(dst, wsf.payload_len, wsf.byte2));
+     if (do_mask) {
+          skb_put(dst, wsf.masking_key);
+     }
+
+     return 0;
 }
 
 int
@@ -360,6 +386,32 @@ ws_start_closing_handshake(sk_t *sk, const int status, const bool do_mask)
           if (!(sk->events & EPOLLOUT))
                turn_on_events(sk, EPOLLOUT);
      }
+
+     return rv;
+}
+
+int
+ws_ping(sk_t *sk, const bool do_mask)
+{
+     AZ(sk->closing);
+
+     int rv = encode_ping_pong_frame(sk->sendbuf, WS_PING_FRAME, do_mask, sk->hash);
+     if (0 == rv)
+          if (!(sk->events & EPOLLOUT))
+               turn_on_events(sk, EPOLLOUT);
+
+     return rv;
+}
+
+int
+ws_pong(sk_t *sk, const bool do_mask)
+{
+     AZ(sk->closing);
+
+     int rv = encode_ping_pong_frame(sk->sendbuf, WS_PONG_FRAME, do_mask, sk->hash);
+     if (0 == rv)
+          if (!(sk->events & EPOLLOUT))
+               turn_on_events(sk, EPOLLOUT);
 
      return rv;
 }

@@ -118,6 +118,8 @@ struct proto {
      int (*decode_handshake)(sk_t *sk, http_req_t *req);
      int (*decode_frame)(sk_t *sk);                 /* Decodes single frame  */
      int (*encode_frame)(sk_t *sk, wsframe_t *wsf); /* Encodes single frame  */
+     int (*ping)(sk_t *sk, const bool mask);   /* Encodes single ping frame  */
+     int (*pong)(sk_t *sk, const bool mask);   /* Encodes single pong frame  */
      int (*start_closing_handshake)(sk_t *sk, int status, bool mask);
 };
 
@@ -140,6 +142,7 @@ typedef struct {
      uint8_t     verbose;
      bool        no_fork;      /* Does not fork, stays attached to terminal  */
      int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
+     int         ping_interval;/* Sets ping interval (ms)                    */
      int         closing_handshake_timeout;
      char       *user_agent;
      char       *request_target;/* Request target; see section 5.3.1 RFC7230 */
