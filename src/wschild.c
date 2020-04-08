@@ -138,7 +138,8 @@ check_timeouts_for_each(const struct timespec *now)
 void
 check_timeouts(sk_t *sk, const struct timespec *now)
 {
-     if (check_timeout(sk, now, wsd_cfg->idle_timeout)) {
+     if (-1 != wsd_cfg->idle_timeout
+         && check_timeout(sk, now, wsd_cfg->idle_timeout)) {
           if (!sk->proto->start_closing_handshake
               || 0 > sk->proto->start_closing_handshake(sk, WS_1000, false)) {
                /* Closing handshake failed or not required: close socket */
@@ -151,7 +152,9 @@ check_timeouts(sk_t *sk, const struct timespec *now)
           }
      }
 
-     if (check_closing_handshake_timeout(sk, now, wsd_cfg->idle_timeout)) {
+     if (check_closing_handshake_timeout(sk,
+                                         now,
+                                         wsd_cfg->closing_handshake_timeout)) {
           /* Closing handshake timed out: close socket */
           AZ(sk->ops->close(sk));
           return;

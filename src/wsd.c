@@ -38,7 +38,7 @@
 #include "common.h"
 
 #define DEFAULT_CLOSING_HANDSHAKE_TIMEOUT 8000   /* 8 seconds  */
-#define DEFAULT_IDLE_TIMEOUT              30000  /* 30 seconds */
+#define DEFAULT_IDLE_TIMEOUT              -1     /* disabled   */
 #define DEFAULT_FORWARD_PORT              "6085"
 #define DEFAULT_FORWARD_HOST              "127.0.0.1"
 #define DEFAULT_LISTENING_PORT            6084
@@ -120,6 +120,9 @@ main(int argc, char **argv)
 
      if (NULL == u_arg)
           u_arg = "wsd";
+
+     if (0 > i_arg)
+          i_arg = DEFAULT_IDLE_TIMEOUT;
 
      struct passwd *pwent;
      if (NULL == (pwent = getpwnam(u_arg))) {

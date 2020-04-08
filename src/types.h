@@ -141,8 +141,8 @@ typedef struct {
      const char *pidfilename;
      uint8_t     verbose;
      bool        no_fork;      /* Does not fork, stays attached to terminal  */
-     int         idle_timeout; /* Sets idle timeout (ms) after read/write op */
-     int         ping_interval;/* Sets ping interval (ms)                    */
+     int         idle_timeout; /* Idle timeout (ms) after read/write op      */
+     int         ping_interval;/* Ping interval (ms)                         */
      int         closing_handshake_timeout;
      char       *user_agent;
      char       *request_target;/* Request target; see section 5.3.1 RFC7230 */

@@ -457,7 +457,9 @@ wssk_close(sk_t *sk) {
 int
 stdin_close(sk_t *sk)
 {
-     if (-1 == wsd_cfg->idle_timeout && -1 == repeat_last_num) {
+     if (-1 == wsd_cfg->idle_timeout
+         && -1 == wsd_cfg->ping_interval
+         && -1 == repeat_last_num) {
           if (!no_handshake)
                wssk_ws_start_closing_handshake();
      } else if (0 < repeat_last_num) {
