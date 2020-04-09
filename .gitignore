@@ -31,6 +31,7 @@ src/.deps
 test/.libs
 test/.dirstamp
 test/.deps
+test/parser
 autom4te.cache
 aclocal.m4
 test-driver
