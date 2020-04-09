@@ -1,4 +1,4 @@
-.TH wsd 8 "March 19th, 2020" 0.25
+.TH wsd 8 "April 8th, 2020" 0.26
 .SH NAME
 wsd \- terminate websockets and multiplex to remote host
 .SH SYNOPSIS
@@ -32,10 +32,10 @@ Runs daemon as user. Default is \fBwsd\fR; user cannot be root.
 Does not fork and stays attached to terminal.
 .TP
 .BI \-i " millis"
-Sets idle read/write timeout in milliseconds. This is the maximum time that you allow a websocket to idle after a read from or a write to it. Default is 30 seconds.
+Sets idle read/write timeout in milliseconds. This is the maximum time that you allow a websocket to idle after a read from or a write to it. By default this timeout is disabled.
 .TP
 .BI \-n " seconds"
-Sets ping interval in seconds at which to send a ping frame over a websocket. If data is read from or written to a websocket during the ping interval then no ping frame is sent. By default, the ping mechanism is disabled.
+Sets ping interval in seconds at which to send a ping frame over a websocket. If data is read from or written to a websocket during the ping interval then no ping frame is sent. By default the ping mechanism is disabled.
 .TP
 .B \-v
 Enables diagnostic information on standard error. Use this option multiple times for maximum effect. Implies that daemon stays attached to terminal.

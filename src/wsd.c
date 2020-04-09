@@ -287,7 +287,7 @@ Terminate websockets and multiplex their frames to some backend.\n\n\
   -p  store process id in file\n\
   -u  run daemon as user, defaults to wsd\n\
   -d  do not fork and stay attached to terminal\n\
-  -i  idle read/write timeout in milliseconds, defaults to 30 seconds\n\
+  -i  idle read/write timeout in milliseconds, disabled by default\n\
   -n  ping interval in seconds, defaults to none\n\
   -v  be verbose (use multiple times for maximum effect)\n\
   -?  display this help and exit\n\n\

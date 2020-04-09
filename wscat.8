@@ -1,4 +1,4 @@
-.TH wscat 8 "March 19th, 2020" 0.25
+.TH wscat 8 "April 8th, 2020" 0.26
 .SH NAME
 wscat \- write to and read from websocket
 .SH SYNOPSIS
@@ -30,7 +30,7 @@ The maximum time in milliseconds that you allow wscat to idle after a read from 
 The ping interval in seconds at which wscat sends a ping frame to a remote system. If data is read from or written to a websocket during the ping interval then no ping frame is sent. By default, the command does not ping.
 .TP
 .IP "-j, --json"
-Assumes that input is formatted as JavaScript Object Notation (JSON). Each object is sent in a single frame.
+Assumes that input is formatted as an object in JavaScript Object Notation (JSON). Each object is sent in a single frame.
 .TP
 .IP "-N, --no-handshake"
 Does not start or finish a closing handshake. Use this option to test only, it violates RFC 6455.
