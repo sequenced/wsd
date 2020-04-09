@@ -52,7 +52,7 @@ extern sk_t *pp2sk;
 
 static const char *FLD_SEC_WS_VER_VAL = "13";
 
-static bool is_valid_proto(http_req_t *hr);
+static bool is_valid_proto(const char *proto, http_req_t *hr);
 static bool is_valid_ver(http_req_t *hr);
 static int prepare_handshake(skb_t *b, http_req_t *hr);
 static int generate_accept_val(skb_t *b, http_req_t *hr);
@@ -122,8 +122,8 @@ ws_decode_handshake(sk_t *sk, http_req_t *req)
 
      /* TODO check location */
 
-     /* TODO make protocol configurable */
-     if (!is_valid_proto(req)) {
+     if (NULL != wsd_cfg->sec_ws_proto
+         && !is_valid_proto(wsd_cfg->sec_ws_proto, req)) {
           
           if (0 == skb_put_strn(sk->sendbuf, HTTP_400, strlen(HTTP_400))) {
                sk->close_on_write = 1;
@@ -191,10 +191,10 @@ is_valid_ver(http_req_t *hr)
 }
 
 bool
-is_valid_proto(http_req_t *hr)
+is_valid_proto(const char* proto, http_req_t *hr)
 {
      trim(&(hr->sec_ws_proto));
-     if (0 != strncmp(hr->sec_ws_proto.p, "jen", hr->sec_ws_proto.len))
+     if (0 != strncmp(hr->sec_ws_proto.p, proto, hr->sec_ws_proto.len))
           return false;
 
      return true;

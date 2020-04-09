@@ -37,6 +37,9 @@ Sets idle read/write timeout in milliseconds. This is the maximum time that you 
 .BI \-n " seconds"
 Sets ping interval in seconds at which to send a ping frame over a websocket. If data is read from or written to a websocket during the ping interval then no ping frame is sent. By default the ping mechanism is disabled.
 .TP
+.BI \-P " protocol"
+Sets protocol string that is expected in a Sec-WebSocket-Proto propery of an HTTP upgrade request. By default any string can be passed, that is, the field is not validated.
+.TP
 .B \-v
 Enables diagnostic information on standard error. Use this option multiple times for maximum effect. Implies that daemon stays attached to terminal.
 .TP

@@ -62,11 +62,12 @@ main(int argc, char **argv)
      const char *f_arg = DEFAULT_FORWARD_PORT;
      const char *u_arg = NULL;
      const char *p_arg = NULL;
+     const char *P_arg = NULL;
      unsigned int h_arg_num = 0;
      char **h_arg = calloc(sizeof *h_arg, DEFAULT_MAX_HOSTNAMES);
      A(h_arg);
 
-     while ((opt = getopt(argc, argv, "h:p:o:f:u:i:n:dv?")) != -1) {
+     while ((opt = getopt(argc, argv, "h:p:P:o:f:u:i:n:dv?")) != -1) {
           switch (opt) {
           case 'h':
                if (h_arg_num >= DEFAULT_MAX_HOSTNAMES) {
@@ -83,6 +84,9 @@ main(int argc, char **argv)
                break;
           case 'p':
                p_arg = optarg;
+               break;
+          case 'P':
+               P_arg = optarg;
                break;
           case 'o':
                o_arg = atoi(optarg);
@@ -160,6 +164,7 @@ main(int argc, char **argv)
      cfg.verbose = v_arg;
      cfg.no_fork = d_arg;
      cfg.pidfilename = p_arg;
+     cfg.sec_ws_proto = P_arg;
      cfg.idle_timeout = i_arg;
      cfg.ping_interval = n_arg * 1000; /* convert sec to ms */
      cfg.closing_handshake_timeout = DEFAULT_CLOSING_HANDSHAKE_TIMEOUT;
@@ -285,6 +290,7 @@ Terminate websockets and multiplex their frames to some backend.\n\n\
   -f  multiplex to port, defaults to 6085\n\
   -o  listen on port for incoming websocket connections, defaults to 6084\n\
   -p  store process id in file\n\
+  -P  sets expected Sec-WebSocket-Protocol HTTP request string, disabled by default\n\
   -u  run daemon as user, defaults to wsd\n\
   -d  do not fork and stay attached to terminal\n\
   -i  idle read/write timeout in milliseconds, disabled by default\n\
