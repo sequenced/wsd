@@ -81,7 +81,7 @@ struct sk;
 typedef struct {
      unsigned int rdpos;
      unsigned int wrpos;
-     char         data[524288];
+     char         data[1048576];
 } skb_t;
 
 struct proto;
